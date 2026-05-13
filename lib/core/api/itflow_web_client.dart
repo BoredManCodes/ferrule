@@ -166,60 +166,97 @@ class ItflowWebClient {
     return b.accent;
   }
 
-  /// One round-trip that fetches both the accent color *and* the company name
-  /// (via the agent page <title> tag, which ITFlow renders as the configured
-  /// company_name).
+  /// Fetches the configured company name (from login.php, no auth required)
+  /// and the AdminLTE accent color (from an authenticated agent page — the
+  /// login page doesn't carry the `accent-<name>` body class).
   Future<({String? accent, String? name})> fetchInstanceBranding() async {
-    await _ensureLoggedIn();
-    for (final path in const [
-      '/agent/home.php',
-      '/agent/dashboard.php',
-      '/index.php'
-    ]) {
-      try {
-        final r = await _dio.get(
-          '$_root$path',
-          options: Options(
-            followRedirects: true,
-            maxRedirects: 5,
-            validateStatus: (s) => s != null && s < 500,
-          ),
-        );
-        final body = r.data?.toString() ?? '';
-        if (body.isEmpty) continue;
-        final accent = RegExp(r'\baccent-([a-z][a-z0-9-]*)\b')
-            .firstMatch(body)
-            ?.group(1)
-            ?.toLowerCase();
-        final title = RegExp(
-          r'<title[^>]*>\s*([^<]+?)\s*</title>',
-          caseSensitive: false,
-          dotAll: true,
-        ).firstMatch(body)?.group(1);
-        final name = _cleanTitle(title);
-        if (accent != null || name != null) {
-          return (accent: accent, name: name);
-        }
-      } catch (_) {/* try next */}
-    }
-    return (accent: null, name: null);
+    String? name;
+    String? accent;
+
+    // 1. Login page: cheap, public, and ITFlow renders the configured
+    //    `config_login_company_name` as the title prefix.
+    try {
+      final r = await _dio.get(
+        '$_root/login.php',
+        options: Options(
+          followRedirects: true,
+          maxRedirects: 5,
+          validateStatus: (s) => s != null && s < 500,
+        ),
+      );
+      if (r.statusCode != null && r.statusCode! < 300) {
+        name = _cleanTitle(_extractTitle(r.data?.toString() ?? ''));
+      }
+    } catch (_) {/* fall through to agent pages */}
+
+    // 2. Agent pages: authenticated, but the only place the body carries
+    //    `accent-<name>`. Also a fallback for the name if login.php was
+    //    unreachable.
+    try {
+      await _ensureLoggedIn();
+      for (final path in const [
+        '/agent/home.php',
+        '/agent/dashboard.php',
+        '/index.php'
+      ]) {
+        if (accent != null && name != null) break;
+        try {
+          final r = await _dio.get(
+            '$_root$path',
+            options: Options(
+              followRedirects: true,
+              maxRedirects: 5,
+              validateStatus: (s) => s != null && s < 500,
+            ),
+          );
+          // Skip 4xx — some instances don't expose every candidate path
+          // (e.g. /agent/home.php may 404), and the server's 404 page often
+          // has `<title>404 Not Found</title>`.
+          if (r.statusCode == null || r.statusCode! >= 300) continue;
+          final body = r.data?.toString() ?? '';
+          if (body.isEmpty) continue;
+          accent ??= RegExp(r'\baccent-([a-z][a-z0-9-]*)\b')
+              .firstMatch(body)
+              ?.group(1)
+              ?.toLowerCase();
+          name ??= _cleanTitle(_extractTitle(body));
+        } catch (_) {/* try next */}
+      }
+    } catch (_) {/* keep whatever we got from login.php */}
+
+    return (accent: accent, name: name);
+  }
+
+  String? _extractTitle(String body) {
+    if (body.isEmpty) return null;
+    return RegExp(
+      r'<title[^>]*>\s*([^<]+?)\s*</title>',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(body)?.group(1);
   }
 
   String? _cleanTitle(String? raw) {
     if (raw == null) return null;
-    final t = raw
+    var t = raw
         .replaceAll('&amp;', '&')
         .replaceAll('&#039;', "'")
         .replaceAll('&quot;', '"')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
+    // ITFlow's login page renders "<company> | Login" — strip the suffix so
+    // we end up storing just the company name.
+    t = t
+        .replaceFirst(RegExp(r'\s*\|\s*login\s*$', caseSensitive: false), '')
+        .trim();
     if (t.isEmpty) return null;
-    // Skip generic / login titles so we don't latch onto them.
     final lower = t.toLowerCase();
-    if (lower == 'login' || lower.startsWith('login |') ||
-        lower == 'itflow' || lower == 'home') {
+    if (lower == 'login' || lower == 'itflow' || lower == 'home') {
       return null;
     }
+    // Defensive: even if a server 200s with an error page, drop obvious
+    // HTTP-status-style titles ("404 Not Found", "403 Forbidden", etc.).
+    if (RegExp(r'^[45]\d{2}\b').hasMatch(t)) return null;
     return t;
   }
 
