@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api/providers.dart';
+import '../../core/auth/app_lock.dart';
 import '../../core/sentry/sentry_config.dart';
 import '../../core/settings/app_settings.dart';
 import '../../core/settings/crash_consent.dart';
@@ -197,6 +198,9 @@ class SettingsScreen extends ConsumerWidget {
               style: TextStyle(fontSize: 12),
             ),
           ),
+          const Divider(),
+          const _SectionHeader('Security'),
+          _RequireUnlockTile(),
           if (sentryConfigured) ...[
             const Divider(),
             const _SectionHeader('Privacy'),
@@ -535,6 +539,47 @@ class _AccentTiles extends ConsumerWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _RequireUnlockTile extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings =
+        ref.watch(appSettingsProvider).value ?? const AppSettings();
+    final canAuth = ref.watch(canAuthenticateProvider).value ?? false;
+    final scheme = Theme.of(context).colorScheme;
+    return SwitchListTile(
+      secondary: const Icon(Icons.fingerprint),
+      title: const Text('Require unlock on launch'),
+      subtitle: Text(
+        !canAuth
+            ? 'Set up a screen lock or biometric on this device to enable.'
+            : settings.requireDeviceUnlock
+                ? 'Biometric or device PIN required when the app starts.'
+                : 'App opens straight to your account.',
+        style: TextStyle(color: scheme.onSurfaceVariant),
+      ),
+      value: settings.requireDeviceUnlock && canAuth,
+      onChanged: !canAuth
+          ? null
+          : (v) async {
+              final notifier = ref.read(appSettingsProvider.notifier);
+              if (v) {
+                final ok = await promptDeviceUnlock(
+                  ref.read(localAuthProvider),
+                  reason: 'Confirm to enable launch unlock',
+                );
+                if (!ok) return;
+                await notifier.setRequireDeviceUnlock(true);
+                // The user just authenticated to enable it — don't immediately
+                // prompt again on the very next router refresh.
+                ref.read(appLockProvider.notifier).markUnlocked();
+              } else {
+                await notifier.setRequireDeviceUnlock(false);
+              }
+            },
     );
   }
 }

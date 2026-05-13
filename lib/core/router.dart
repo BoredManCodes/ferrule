@@ -15,6 +15,7 @@ import '../features/credentials/credential_detail_screen.dart';
 import '../features/credentials/credential_form_screen.dart';
 import '../features/credentials/credentials_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
+import '../features/lock/lock_screen.dart';
 import '../features/more/more_screen.dart';
 import '../features/readonly/readonly_screens.dart';
 import '../features/settings/settings_screen.dart';
@@ -26,7 +27,9 @@ import '../features/tickets/ticket_detail_screen.dart';
 import '../features/tickets/tickets_screen.dart';
 import '../features/timer/timer_screen.dart';
 import 'api/providers.dart';
+import 'auth/app_lock.dart';
 import 'sentry/sentry_config.dart';
+import 'settings/app_settings.dart';
 import 'settings/crash_consent.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -38,17 +41,25 @@ final routerProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final auth = ref.read(credentialsProvider);
       final consent = ref.read(crashConsentProvider);
-      if (auth.isLoading || consent.isLoading) return null;
+      final settings = ref.read(appSettingsProvider);
+      if (auth.isLoading || consent.isLoading || settings.isLoading) {
+        return null;
+      }
       final loggedIn = auth.value != null;
       final consentNeeded =
           sentryConfigured && consent.value == CrashConsent.unset;
+      final lockRequired = ref.read(lockRequiredProvider);
       final loc = state.matchedLocation;
       final atConsent = loc == '/consent';
       final atSetup = loc == '/setup';
+      final atLock = loc == '/lock';
       if (consentNeeded && !atConsent) return '/consent';
       if (!consentNeeded && atConsent) return loggedIn ? '/' : '/setup';
       if (!loggedIn && !atSetup && !atConsent) return '/setup';
-      if (loggedIn && atSetup) return '/';
+      if (!loggedIn && atLock) return '/setup';
+      if (loggedIn && atSetup) return lockRequired ? '/lock' : '/';
+      if (lockRequired && !atLock) return '/lock';
+      if (!lockRequired && atLock) return '/';
       return null;
     },
     refreshListenable: _AuthListenable(ref),
@@ -56,6 +67,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
           path: '/consent', builder: (_, __) => const CrashConsentScreen()),
       GoRoute(path: '/setup', builder: (_, __) => const SetupScreen()),
+      GoRoute(path: '/lock', builder: (_, __) => const LockScreen()),
       ShellRoute(
         builder: (context, state, child) => AppShell(child: child),
         routes: [
@@ -281,5 +293,7 @@ class _AuthListenable extends ChangeNotifier {
   _AuthListenable(Ref ref) {
     ref.listen(credentialsProvider, (_, __) => notifyListeners());
     ref.listen(crashConsentProvider, (_, __) => notifyListeners());
+    ref.listen(appSettingsProvider, (_, __) => notifyListeners());
+    ref.listen(appLockProvider, (_, __) => notifyListeners());
   }
 }

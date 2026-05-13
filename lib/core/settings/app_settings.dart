@@ -47,6 +47,7 @@ class AppSettings {
   final String? cachedInstanceAccent; // last scraped from ITFlow
   final String? cachedInstanceName; // company_name from agent <title>
   final String themeMode; // 'system' | 'light' | 'dark' | 'oled'
+  final bool requireDeviceUnlock;
 
   const AppSettings({
     this.displayName,
@@ -55,6 +56,7 @@ class AppSettings {
     this.cachedInstanceAccent,
     this.cachedInstanceName,
     this.themeMode = 'system',
+    this.requireDeviceUnlock = false,
   });
 
   /// User override > scraped company name > "ITFlow".
@@ -78,6 +80,7 @@ class AppSettings {
     String? cachedInstanceAccent,
     String? cachedInstanceName,
     String? themeMode,
+    bool? requireDeviceUnlock,
     bool clearDisplayName = false,
   }) =>
       AppSettings(
@@ -90,6 +93,7 @@ class AppSettings {
             cachedInstanceAccent ?? this.cachedInstanceAccent,
         cachedInstanceName: cachedInstanceName ?? this.cachedInstanceName,
         themeMode: themeMode ?? this.themeMode,
+        requireDeviceUnlock: requireDeviceUnlock ?? this.requireDeviceUnlock,
       );
 }
 
@@ -100,6 +104,7 @@ class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
   static const _kCached = 'pref.cachedInstanceAccent';
   static const _kCachedName = 'pref.cachedInstanceName';
   static const _kThemeMode = 'pref.themeMode';
+  static const _kRequireDeviceUnlock = 'pref.requireDeviceUnlock';
 
   Future<SharedPreferences> _prefs() => SharedPreferences.getInstance();
 
@@ -113,7 +118,15 @@ class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
       cachedInstanceAccent: p.getString(_kCached),
       cachedInstanceName: p.getString(_kCachedName),
       themeMode: p.getString(_kThemeMode) ?? 'system',
+      requireDeviceUnlock: p.getBool(_kRequireDeviceUnlock) ?? false,
     );
+  }
+
+  Future<void> setRequireDeviceUnlock(bool value) async {
+    final p = await _prefs();
+    await p.setBool(_kRequireDeviceUnlock, value);
+    final current = state.value ?? const AppSettings();
+    state = AsyncValue.data(current.copyWith(requireDeviceUnlock: value));
   }
 
   Future<void> setCachedInstanceName(String name) async {
