@@ -1,0 +1,22 @@
+itflow-app
+Copyright 2026 itflow-app contributors
+
+Licensed under the Apache License, Version 2.0 (the "License").
+See the LICENSE file in this repository for the full license text.
+
+----------------------------------------------------------------------
+
+This application is an unofficial mobile/desktop client for ITFlow
+(https://itflow.org / https://github.com/itflow-org/itflow).
+
+ITFlow is an independent open-source project, distributed under the
+GNU General Public License v3.0 (GPL-3.0). This client does not
+incorporate or redistribute any source code from the ITFlow project;
+it communicates with ITFlow servers via their HTTP API.
+
+The "ITFlow" name and logo are property of the ITFlow project and its
+maintainers. Any use of the ITFlow name or icon in this client is for
+the purpose of identifying the upstream service this client connects to,
+and is intended to be used only with the permission of the ITFlow
+maintainers. This client is not affiliated with, endorsed by, or
+officially supported by the ITFlow project unless explicitly stated.
