@@ -60,23 +60,13 @@ const devId = String(
     '4679601468196856322',
 );
 const appId = String(
-  args['app-id'] || process.env.PLAY_APP_ID || 'REPLACE_WITH_FERRULE_APP_ID',
+  args['app-id'] || process.env.PLAY_APP_ID || '4972026260377304123',
 );
 const track = String(args.track || 'internal-testing');
 const releaseName = args['release-name'] ? String(args['release-name']) : null;
 const versionCode = args['version-code'] ? String(args['version-code']) : null;
 const loginMode = !!args.login;
 const headless = !loginMode && !!args.headless && !args.headed;
-
-if (!loginMode && appId === 'REPLACE_WITH_FERRULE_APP_ID') {
-  console.error(
-    '[promote] PLAY_APP_ID not set. Pass --app-id <id>, or set the env var.',
-  );
-  console.error(
-    '[promote] Find it in the Play Console URL: .../developers/<dev>/app/<APP_ID>/tracks/...',
-  );
-  process.exit(2);
-}
 
 const trackUrl = `https://play.google.com/console/u/0/developers/${devId}/app/${appId}/tracks/${track}`;
 
