@@ -1,8 +1,11 @@
+import 'dart:convert';
+
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:html/parser.dart' as html_parser;
 
+import '../../features/expenses/expense_form_data.dart';
 import '../../features/tickets/reply_model.dart';
 import 'api_response.dart';
 
@@ -616,5 +619,183 @@ class ItflowWebClient {
           statusCode: resp.statusCode);
     }
     // ITFlow's response is typically a 302 redirect to the ticket page on success.
+  }
+
+  /// Fetches the "New Expense" modal HTML and parses out CSRF token + the
+  /// account/vendor/category/client option lists ITFlow shows on the web form.
+  /// The modal endpoint returns `{"content": "...html..."}` JSON.
+  Future<ExpenseAddFormData> fetchExpenseAddForm() async {
+    await _ensureLoggedIn();
+    Future<Response> doGet() => _dio.get(
+          '$_root/agent/modals/expense/expense_add.php',
+          options: Options(
+            followRedirects: true,
+            maxRedirects: 5,
+            validateStatus: (s) => s != null && s < 500,
+          ),
+        );
+    var resp = await doGet();
+    var raw = resp.data;
+    // Session lapsed — body will be the login page HTML, not JSON.
+    final bodyStr = raw is String ? raw : (raw?.toString() ?? '');
+    if (bodyStr.contains('name="email"') && bodyStr.contains('name="password"')) {
+      _loggedIn = false;
+      _csrfToken = null;
+      await _ensureLoggedIn();
+      resp = await doGet();
+      raw = resp.data;
+    }
+
+    String htmlContent;
+    if (raw is Map && raw['content'] is String) {
+      htmlContent = raw['content'] as String;
+    } else {
+      final s = raw is String ? raw : (raw?.toString() ?? '');
+      // Some responses come through as a JSON string when dio doesn't parse.
+      try {
+        final decoded = jsonDecode(s);
+        if (decoded is Map && decoded['content'] is String) {
+          htmlContent = decoded['content'] as String;
+        } else {
+          htmlContent = s;
+        }
+      } catch (_) {
+        htmlContent = s;
+      }
+    }
+
+    final doc = html_parser.parse(htmlContent);
+    final csrf =
+        doc.querySelector('input[name="csrf_token"]')?.attributes['value'];
+    if (csrf == null || csrf.isEmpty) {
+      throw ApiException(
+          'Could not load expense form — missing CSRF token. Are web credentials correct?');
+    }
+
+    List<NamedOption> parseOptions(String name, {bool stripBalance = false}) {
+      final out = <NamedOption>[];
+      final select = doc.querySelector('select[name="$name"]');
+      if (select == null) return out;
+      for (final opt in select.querySelectorAll('option')) {
+        final value = opt.attributes['value'] ?? '';
+        final id = int.tryParse(value);
+        if (id == null || id == 0) continue;
+        String label;
+        if (stripBalance) {
+          final left = opt.querySelector('div.float-left');
+          label = (left?.text ?? opt.text).trim();
+        } else {
+          label = opt.text.trim();
+        }
+        if (label.isEmpty) label = 'Item #$id';
+        out.add(NamedOption(id: id, name: label));
+      }
+      return out;
+    }
+
+    int? defaultAccount;
+    final acctSel = doc.querySelector('select[name="account"]');
+    if (acctSel != null) {
+      final sel = acctSel.querySelector('option[selected]');
+      if (sel != null) {
+        defaultAccount = int.tryParse(sel.attributes['value'] ?? '');
+        if (defaultAccount == 0) defaultAccount = null;
+      }
+    }
+
+    return ExpenseAddFormData(
+      csrfToken: csrf,
+      accounts: parseOptions('account', stripBalance: true),
+      vendors: parseOptions('vendor'),
+      categories: parseOptions('category'),
+      clients: parseOptions('client_id'),
+      defaultAccountId: defaultAccount,
+    );
+  }
+
+  /// Submits the "New Expense" form. [receiptBytes] + [receiptFileName] are
+  /// optional; when provided, the file is attached under the `file` field
+  /// (matching the web modal). Date must be `YYYY-MM-DD`.
+  Future<void> addExpense({
+    required String csrfToken,
+    required String date,
+    required double amount,
+    required int accountId,
+    required int vendorId,
+    required int categoryId,
+    required int clientId,
+    required String description,
+    required String reference,
+    String? receiptFilePath,
+    List<int>? receiptBytes,
+    String? receiptFileName,
+  }) async {
+    await _ensureLoggedIn();
+
+    String currentCsrf = csrfToken;
+
+    FormData buildForm() {
+      final form = FormData.fromMap({
+        'add_expense': '1',
+        'csrf_token': currentCsrf,
+        'date': date,
+        'amount': amount.toStringAsFixed(2),
+        'account': accountId,
+        'vendor': vendorId,
+        'category': categoryId,
+        'client_id': clientId,
+        'description': description,
+        'reference': reference,
+      });
+      if (receiptFileName != null && receiptFileName.isNotEmpty) {
+        if (receiptBytes != null) {
+          form.files.add(MapEntry(
+            'file',
+            MultipartFile.fromBytes(receiptBytes, filename: receiptFileName),
+          ));
+        } else if (receiptFilePath != null && receiptFilePath.isNotEmpty) {
+          form.files.add(MapEntry(
+            'file',
+            MultipartFile.fromFileSync(receiptFilePath,
+                filename: receiptFileName),
+          ));
+        }
+      }
+      return form;
+    }
+
+    Future<Response> doPost() => _dio.post(
+          '$_root/agent/post.php',
+          data: buildForm(),
+          options: Options(
+            headers: {'Referer': '$_root/agent/expenses.php'},
+            followRedirects: false,
+            validateStatus: (s) => s != null && s < 500,
+          ),
+        );
+
+    var resp = await doPost();
+    final loc = resp.headers.value('location');
+    if (loc != null && loc.toLowerCase().contains('login.php')) {
+      _loggedIn = false;
+      _csrfToken = null;
+      await _ensureLoggedIn();
+      currentCsrf = await _getCsrf();
+      resp = await doPost();
+    }
+
+    if (resp.statusCode != null && resp.statusCode! >= 400) {
+      throw ApiException('Add expense failed: HTTP ${resp.statusCode}',
+          statusCode: resp.statusCode);
+    }
+
+    // CSRF rejection causes a redirect to index.php with an alert in session.
+    // Distinguish that from the normal success redirect (back to expenses.php).
+    final finalLoc = resp.headers.value('location') ?? '';
+    if (finalLoc.toLowerCase().endsWith('/index.php') ||
+        finalLoc.toLowerCase().contains('login.php')) {
+      throw ApiException(
+          'Server rejected the request — try logging out and back in.');
+    }
   }
 }

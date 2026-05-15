@@ -49,6 +49,13 @@ class _RowKey {
   int get hashCode => Object.hash(module, idField, id);
 }
 
+/// Invalidates the cached list for the given read-only module (e.g. 'expenses'),
+/// forcing the next watch to refetch. Used by sibling features (like the
+/// expense create form) so newly-added rows show up immediately.
+void invalidateModuleList(WidgetRef ref, String module) {
+  ref.invalidate(_listProvider(module));
+}
+
 final _rowProvider = FutureProvider.autoDispose
     .family<Map<String, dynamic>?, _RowKey>((ref, k) async {
   await ref.watch(credentialsProvider.future);
@@ -312,6 +319,7 @@ class _SearchList extends ConsumerStatefulWidget {
   final String? archivedField;
   final Comparator<Map<String, dynamic>>? sort;
   final Widget Function(BuildContext, Map<String, dynamic>) buildItem;
+  final Widget? floatingActionButton;
 
   const _SearchList({
     required this.module,
@@ -322,6 +330,7 @@ class _SearchList extends ConsumerStatefulWidget {
     required this.buildItem,
     this.archivedField,
     this.sort,
+    this.floatingActionButton,
   });
 
   @override
@@ -336,6 +345,7 @@ class _SearchListState extends ConsumerState<_SearchList> {
   Widget build(BuildContext context) {
     final async = ref.watch(_listProvider(widget.module));
     return Scaffold(
+      floatingActionButton: widget.floatingActionButton,
       appBar: AppBar(
         title: Text(widget.title),
         actions: [
@@ -1503,6 +1513,11 @@ class ExpensesScreen extends StatelessWidget {
         icon: Icons.payments_outlined,
         searchHint: 'Search expenses…',
         archivedField: 'expense_archived_at',
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () => context.push('/expenses/new'),
+          icon: const Icon(Icons.add),
+          label: const Text('New'),
+        ),
         sort: (a, b) {
           final av = toDate(a['expense_date']) ?? DateTime(0);
           final bv = toDate(b['expense_date']) ?? DateTime(0);

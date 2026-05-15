@@ -15,6 +15,7 @@ import '../features/credentials/credential_detail_screen.dart';
 import '../features/credentials/credential_form_screen.dart';
 import '../features/credentials/credentials_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
+import '../features/expenses/expense_form_screen.dart';
 import '../features/lock/lock_screen.dart';
 import '../features/more/more_screen.dart';
 import '../features/readonly/readonly_screens.dart';
@@ -262,6 +263,10 @@ final routerProvider = Provider<GoRouter>((ref) {
             path: '/expenses',
             builder: (_, __) => const ExpensesScreen(),
             routes: [
+              GoRoute(
+                path: 'new',
+                builder: (_, __) => const ExpenseFormScreen(),
+              ),
               GoRoute(
                 path: ':id',
                 builder: (_, s) => ExpenseDetailScreen(
