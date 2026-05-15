@@ -50,3 +50,6 @@ app.*.map.json
 # Local-only screenshots / MCP scratch dirs
 /.itflow-screens/
 /.playwright-mcp/
+
+# Internal release pipeline reference — keep local only
+/PLAY_RELEASE_FROM_TPW.md

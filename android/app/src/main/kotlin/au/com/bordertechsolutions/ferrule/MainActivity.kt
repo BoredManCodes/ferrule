@@ -1,4 +1,4 @@
-package com.bordertechsolutions.itflow
+package au.com.bordertechsolutions.ferrule
 
 import io.flutter.embedding.android.FlutterFragmentActivity
 

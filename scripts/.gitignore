@@ -1,0 +1,6 @@
+node_modules/
+.chromium-profile/
+.oauth-token.json
+.release-notes.tmp.txt
+.release-*.log
+.promote-fail-*.png
