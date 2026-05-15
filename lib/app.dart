@@ -7,14 +7,14 @@ import 'core/settings/app_settings.dart';
 import 'core/storage/secure_store.dart';
 import 'core/theme.dart';
 
-class ItflowApp extends ConsumerStatefulWidget {
-  const ItflowApp({super.key});
+class FerruleApp extends ConsumerStatefulWidget {
+  const FerruleApp({super.key});
 
   @override
-  ConsumerState<ItflowApp> createState() => _ItflowAppState();
+  ConsumerState<FerruleApp> createState() => _FerruleAppState();
 }
 
-class _ItflowAppState extends ConsumerState<ItflowApp> {
+class _FerruleAppState extends ConsumerState<FerruleApp> {
   Credentials? _lastSeenCreds;
 
   @override

@@ -1,6 +1,8 @@
-# itflow_app
+# Ferrule — Client for ITFlow
 
 Unofficial mobile/desktop client for [ITFlow](https://itflow.org), the open-source PSA/RMM platform. Built with Flutter.
+
+> A *ferrule* is the small metal band that holds a tool together — apt for a companion client that connects you to your ITFlow instance.
 
 ## Features
 

@@ -15,5 +15,5 @@ Future<void> main() async {
     }
   }
 
-  runApp(const ProviderScope(child: ItflowApp()));
+  runApp(const ProviderScope(child: FerruleApp()));
 }

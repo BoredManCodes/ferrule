@@ -34,7 +34,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
     _autoPrompted = true;
     setState(() => _busy = true);
     final auth = ref.read(localAuthProvider);
-    final ok = await promptDeviceUnlock(auth, reason: 'Unlock ITFlow');
+    final ok = await promptDeviceUnlock(auth, reason: 'Unlock Ferrule');
     if (!mounted) return;
     setState(() => _busy = false);
     if (ok) {

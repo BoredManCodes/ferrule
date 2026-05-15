@@ -1,5 +1,5 @@
-name: itflow_app
-description: "ITFlow mobile/desktop client"
+name: ferrule
+description: "Ferrule — unofficial client for ITFlow"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -66,8 +66,8 @@ flutter_launcher_icons:
   ios: false
   remove_alpha_ios: true
   image_path: "assets/icon/icon.png"
-  adaptive_icon_background: "#4338CA"
-  adaptive_icon_foreground: "assets/icon/icon.png"
+  adaptive_icon_background: "#3730A3"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
