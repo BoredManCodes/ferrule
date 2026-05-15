@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api/itflow_client.dart';
 import '../../core/api/providers.dart';
@@ -322,6 +323,21 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                               )
                             : const Icon(Icons.arrow_forward),
                         label: Text(_busy ? 'Connecting…' : 'Connect'),
+                      ),
+                      const SizedBox(height: 12),
+                      Center(
+                        child: TextButton.icon(
+                          onPressed: () => launchUrl(
+                            Uri.parse(
+                                'https://github.com/BoredManCodes/ferrule/blob/main/PRIVACY.md'),
+                            mode: LaunchMode.externalApplication,
+                          ),
+                          icon: const Icon(Icons.policy_outlined, size: 16),
+                          label: const Text('Privacy policy'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: scheme.onSurfaceVariant,
+                          ),
+                        ),
                       ),
                     ],
                   ),

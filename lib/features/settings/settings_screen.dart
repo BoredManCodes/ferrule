@@ -20,6 +20,19 @@ class SettingsScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         children: [
+          ListTile(
+            leading: const Icon(Icons.info_outline),
+            title: const Text('About'),
+            subtitle: const Text(
+                'Built by Trent Buckley • Border Tech Solutions'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => showDialog<void>(
+              context: context,
+              useRootNavigator: true,
+              builder: (_) => const _AboutDialog(),
+            ),
+          ),
+          const Divider(),
           const _SectionHeader('Appearance'),
           ListTile(
             leading: const Icon(Icons.badge_outlined),
@@ -39,8 +52,8 @@ class SettingsScreen extends ConsumerWidget {
                     title: 'Display name',
                     initial: settings.displayName ?? '',
                     helper: settings.cachedInstanceName != null
-                        ? 'Leave empty to use "${settings.cachedInstanceName}" from your ITFlow instance. Launcher icon & name stay as ITFlow.'
-                        : 'Shown in app titles. Launcher icon & name stay as ITFlow.',
+                        ? 'Leave empty to use "${settings.cachedInstanceName}" from your ITFlow instance. Launcher icon & name stay as Ferrule.'
+                        : 'Shown in app titles. Launcher icon & name stay as Ferrule.',
                   ),
                 );
                 if (name != null) {
@@ -201,24 +214,22 @@ class SettingsScreen extends ConsumerWidget {
           const Divider(),
           const _SectionHeader('Security'),
           _RequireUnlockTile(),
-          if (sentryConfigured) ...[
-            const Divider(),
-            const _SectionHeader('Privacy'),
-            _CrashConsentTile(),
-          ],
           const Divider(),
+          const _SectionHeader('Privacy'),
+          if (sentryConfigured) _CrashConsentTile(),
           ListTile(
-            leading: const Icon(Icons.info_outline),
-            title: const Text('About'),
+            leading: const Icon(Icons.policy_outlined),
+            title: const Text('Privacy policy'),
             subtitle: const Text(
-                'Built by Trent Buckley • Border Tech Solutions'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => showDialog<void>(
-              context: context,
-              useRootNavigator: true,
-              builder: (_) => const _AboutDialog(),
+                'How Ferrule handles your data — opens on GitHub'),
+            trailing: const Icon(Icons.open_in_new, size: 18),
+            onTap: () => launchUrl(
+              Uri.parse(
+                  'https://github.com/BoredManCodes/ferrule/blob/main/PRIVACY.md'),
+              mode: LaunchMode.externalApplication,
             ),
           ),
+          const Divider(),
           ListTile(
             leading: Icon(Icons.logout,
                 color: Theme.of(context).colorScheme.error),
@@ -279,7 +290,7 @@ class _AboutDialog extends StatelessWidget {
                 color: scheme.onPrimaryContainer, size: 22),
           ),
           const SizedBox(width: 12),
-          const Expanded(child: Text('ITFlow Client')),
+          const Expanded(child: Text('Ferrule — Client for ITFlow')),
         ],
       ),
       content: Column(
@@ -287,6 +298,31 @@ class _AboutDialog extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text('Mobile companion for your ITFlow instance.'),
+          const SizedBox(height: 12),
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: 'ferrule',
+                  style: TextStyle(
+                    fontStyle: FontStyle.italic,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onSurface,
+                  ),
+                ),
+                TextSpan(
+                  text:
+                      ' /ˈfɛrəl/ — the small metal band that binds a tool together. '
+                      'This client does the same for your ITFlow workflow.',
+                  style: TextStyle(
+                    fontStyle: FontStyle.italic,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
           const SizedBox(height: 16),
           Text(
             'BUILT BY',
@@ -328,6 +364,25 @@ class _AboutDialog extends StatelessWidget {
                 ],
               ),
             ),
+          ),
+          const SizedBox(height: 20),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: () => launchUrl(
+                Uri.parse('https://donate.stripe.com/9B65kE1zZdJf08d51S14400'),
+                mode: LaunchMode.externalApplication,
+              ),
+              icon: const Icon(Icons.favorite_outline, size: 16),
+              label: const Text('Support development'),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Ferrule is free and unaffiliated with ITFlow. If it saves you time, a small tip keeps it maintained.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
           ),
           const SizedBox(height: 20),
           Container(
