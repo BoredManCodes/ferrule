@@ -45,5 +45,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Ferrule records your starting and ending location so it can fill in the source, destination and miles when you log a trip. Location is captured only while a trip is active.</string>
 </dict>
 </plist>

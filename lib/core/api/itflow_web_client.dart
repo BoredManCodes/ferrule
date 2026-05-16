@@ -8,6 +8,7 @@ import 'package:html/parser.dart' as html_parser;
 import '../../features/expenses/expense_form_data.dart';
 import '../../features/invoices/payment_form_data.dart';
 import '../../features/tickets/reply_model.dart';
+import '../../features/trips/trip_form_data.dart';
 import 'api_response.dart';
 
 /// Drives the ITFlow web UI directly (login + agent/post.php).
@@ -792,6 +793,156 @@ class ItflowWebClient {
 
     // CSRF rejection causes a redirect to index.php with an alert in session.
     // Distinguish that from the normal success redirect (back to expenses.php).
+    final finalLoc = resp.headers.value('location') ?? '';
+    if (finalLoc.toLowerCase().endsWith('/index.php') ||
+        finalLoc.toLowerCase().contains('login.php')) {
+      throw ApiException(
+          'Server rejected the request — try logging out and back in.');
+    }
+  }
+
+  /// Fetches the "New Trip" modal HTML and parses out CSRF + driver/client
+  /// option lists. The selected driver is the current logged-in user, which is
+  /// what ITFlow defaults to on the web form.
+  Future<TripAddFormData> fetchTripAddForm() async {
+    await _ensureLoggedIn();
+    Future<Response> doGet() => _dio.get(
+          '$_root/agent/modals/trip/trip_add.php',
+          options: Options(
+            followRedirects: true,
+            maxRedirects: 5,
+            validateStatus: (s) => s != null && s < 500,
+          ),
+        );
+    var resp = await doGet();
+    var raw = resp.data;
+    final bodyStr = raw is String ? raw : (raw?.toString() ?? '');
+    if (bodyStr.contains('name="email"') && bodyStr.contains('name="password"')) {
+      _loggedIn = false;
+      _csrfToken = null;
+      await _ensureLoggedIn();
+      resp = await doGet();
+      raw = resp.data;
+    }
+
+    String htmlContent;
+    if (raw is Map && raw['content'] is String) {
+      htmlContent = raw['content'] as String;
+    } else {
+      final s = raw is String ? raw : (raw?.toString() ?? '');
+      try {
+        final decoded = jsonDecode(s);
+        if (decoded is Map && decoded['content'] is String) {
+          htmlContent = decoded['content'] as String;
+        } else {
+          htmlContent = s;
+        }
+      } catch (_) {
+        htmlContent = s;
+      }
+    }
+
+    final doc = html_parser.parse(htmlContent);
+    final csrf =
+        doc.querySelector('input[name="csrf_token"]')?.attributes['value'];
+    if (csrf == null || csrf.isEmpty) {
+      throw ApiException(
+          'Could not load trip form — missing CSRF token. Are web credentials correct?');
+    }
+
+    final drivers = <NamedOption>[];
+    int? defaultDriver;
+    final userSel = doc.querySelector('select[name="user"]');
+    if (userSel != null) {
+      for (final opt in userSel.querySelectorAll('option')) {
+        final value = opt.attributes['value'] ?? '';
+        final id = int.tryParse(value);
+        if (id == null || id == 0) continue;
+        final label = opt.text.trim();
+        drivers.add(NamedOption(id: id, name: label.isEmpty ? 'User #$id' : label));
+        if (opt.attributes.containsKey('selected')) {
+          defaultDriver = id;
+        }
+      }
+    }
+
+    final clients = <NamedOption>[];
+    final clientSel = doc.querySelector('select[name="client_id"]');
+    if (clientSel != null) {
+      for (final opt in clientSel.querySelectorAll('option')) {
+        final value = opt.attributes['value'] ?? '';
+        final id = int.tryParse(value);
+        if (id == null || id == 0) continue;
+        final label = opt.text.trim();
+        clients.add(NamedOption(id: id, name: label.isEmpty ? 'Client #$id' : label));
+      }
+    }
+
+    return TripAddFormData(
+      csrfToken: csrf,
+      drivers: drivers,
+      clients: clients,
+      defaultDriverId: defaultDriver,
+    );
+  }
+
+  /// Submits the "New Trip" form. [clientId] = 0 means no client. [roundtrip]
+  /// is sent as 1/0 the same way the web checkbox does.
+  Future<void> addTrip({
+    required String csrfToken,
+    required String date,
+    required double miles,
+    required String source,
+    required String destination,
+    required String purpose,
+    required int driverId,
+    required int clientId,
+    bool roundtrip = false,
+  }) async {
+    await _ensureLoggedIn();
+    String currentCsrf = csrfToken;
+
+    FormData build() {
+      return FormData.fromMap({
+        'add_trip': '1',
+        'csrf_token': currentCsrf,
+        'date': date,
+        'miles': miles.toStringAsFixed(1),
+        'source': source,
+        'destination': destination,
+        'purpose': purpose,
+        'user': driverId,
+        'client_id': clientId,
+        if (roundtrip) 'roundtrip': '1',
+      });
+    }
+
+    Future<Response> doPost() => _dio.post(
+          '$_root/agent/post.php',
+          data: build(),
+          options: Options(
+            headers: {'Referer': '$_root/agent/trips.php'},
+            contentType: Headers.formUrlEncodedContentType,
+            followRedirects: false,
+            validateStatus: (s) => s != null && s < 500,
+          ),
+        );
+
+    var resp = await doPost();
+    final loc = resp.headers.value('location') ?? '';
+    if (loc.toLowerCase().contains('login.php')) {
+      _loggedIn = false;
+      _csrfToken = null;
+      await _ensureLoggedIn();
+      currentCsrf = await _getCsrf();
+      resp = await doPost();
+    }
+
+    if (resp.statusCode != null && resp.statusCode! >= 400) {
+      throw ApiException('Add trip failed: HTTP ${resp.statusCode}',
+          statusCode: resp.statusCode);
+    }
+
     final finalLoc = resp.headers.value('location') ?? '';
     if (finalLoc.toLowerCase().endsWith('/index.php') ||
         finalLoc.toLowerCase().contains('login.php')) {

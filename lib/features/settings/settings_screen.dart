@@ -212,6 +212,9 @@ class SettingsScreen extends ConsumerWidget {
             ),
           ),
           const Divider(),
+          const _SectionHeader('Trips'),
+          _TripModeTile(),
+          const Divider(),
           const _SectionHeader('Security'),
           _RequireUnlockTile(),
           const Divider(),
@@ -603,6 +606,45 @@ class _AccentTiles extends ConsumerWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _TripModeTile extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings =
+        ref.watch(appSettingsProvider).value ?? const AppSettings();
+    final scheme = Theme.of(context).colorScheme;
+    final mode = settings.tripMode;
+    String subtitle;
+    switch (mode) {
+      case 'gps':
+        subtitle = 'GPS captures start/end and calculates miles.';
+        break;
+      case 'manual':
+        subtitle =
+            'Just a stopwatch — you enter source, destination, and miles.';
+        break;
+      default:
+        subtitle = 'Asked on first use.';
+    }
+    return ListTile(
+      leading: const Icon(Icons.route_outlined),
+      title: const Text('Trip tracking'),
+      subtitle: Text(subtitle,
+          style: TextStyle(color: scheme.onSurfaceVariant)),
+      trailing: DropdownButton<String?>(
+        value: mode,
+        underline: const SizedBox.shrink(),
+        items: const [
+          DropdownMenuItem<String?>(value: null, child: Text('Ask')),
+          DropdownMenuItem<String?>(value: 'gps', child: Text('GPS')),
+          DropdownMenuItem<String?>(value: 'manual', child: Text('Manual')),
+        ],
+        onChanged: (v) =>
+            ref.read(appSettingsProvider.notifier).setTripMode(v),
+      ),
     );
   }
 }

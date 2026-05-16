@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 - 2026-05-16
+
+- New Trips section under More, with a quick start/stop button in the home AppBar so you can begin a trip without changing tabs.
+- GPS mode captures your starting fix when you tap Start, then on Stop captures the end fix, reverse-geocodes both addresses, and calculates miles via Google Distance Matrix (straight-line fallback if Google can't be reached). A review form opens pre-filled, so all you add is the purpose, driver and client before saving.
+- Manual mode for trips without GPS. Pick it on first use or in Settings, Trips. The app just times the trip, you enter source, destination and miles by hand when you stop.
+- Persistent system notification while a trip is being tracked, so you don't forget to stop it.
+- Active trip state survives the app being killed: you can stop a trip the next day from where it left off.
+- Trips submit through the existing agent web flow (ITFlow's v1 API has no trips endpoint), so the agent email and password in Settings are required to log them.
+
 ## 1.0.4 - 2026-05-16
 
 - Clarify on the connect screen that the vault decrypt password is shown by ITFlow when the API key is created, not something the user chooses.

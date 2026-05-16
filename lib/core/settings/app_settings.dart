@@ -48,6 +48,7 @@ class AppSettings {
   final String? cachedInstanceName; // company_name from agent <title>
   final String themeMode; // 'system' | 'light' | 'dark' | 'oled'
   final bool requireDeviceUnlock;
+  final String? tripMode; // null = ask | 'gps' | 'manual'
 
   const AppSettings({
     this.displayName,
@@ -57,6 +58,7 @@ class AppSettings {
     this.cachedInstanceName,
     this.themeMode = 'system',
     this.requireDeviceUnlock = false,
+    this.tripMode,
   });
 
   /// User override > scraped company name > "ITFlow".
@@ -81,7 +83,9 @@ class AppSettings {
     String? cachedInstanceName,
     String? themeMode,
     bool? requireDeviceUnlock,
+    String? tripMode,
     bool clearDisplayName = false,
+    bool clearTripMode = false,
   }) =>
       AppSettings(
         displayName: clearDisplayName
@@ -94,6 +98,7 @@ class AppSettings {
         cachedInstanceName: cachedInstanceName ?? this.cachedInstanceName,
         themeMode: themeMode ?? this.themeMode,
         requireDeviceUnlock: requireDeviceUnlock ?? this.requireDeviceUnlock,
+        tripMode: clearTripMode ? null : (tripMode ?? this.tripMode),
       );
 }
 
@@ -105,6 +110,7 @@ class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
   static const _kCachedName = 'pref.cachedInstanceName';
   static const _kThemeMode = 'pref.themeMode';
   static const _kRequireDeviceUnlock = 'pref.requireDeviceUnlock';
+  static const _kTripMode = 'pref.tripMode';
 
   Future<SharedPreferences> _prefs() => SharedPreferences.getInstance();
 
@@ -119,7 +125,20 @@ class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
       cachedInstanceName: p.getString(_kCachedName),
       themeMode: p.getString(_kThemeMode) ?? 'system',
       requireDeviceUnlock: p.getBool(_kRequireDeviceUnlock) ?? false,
+      tripMode: p.getString(_kTripMode),
     );
+  }
+
+  Future<void> setTripMode(String? mode) async {
+    final p = await _prefs();
+    if (mode == null) {
+      await p.remove(_kTripMode);
+    } else {
+      await p.setString(_kTripMode, mode);
+    }
+    final current = state.value ?? const AppSettings();
+    state = AsyncValue.data(
+        current.copyWith(tripMode: mode, clearTripMode: mode == null));
   }
 
   Future<void> setRequireDeviceUnlock(bool value) async {

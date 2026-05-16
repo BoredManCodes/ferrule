@@ -29,6 +29,11 @@ import '../features/tickets/edit_ticket_screen.dart';
 import '../features/tickets/ticket_detail_screen.dart';
 import '../features/tickets/tickets_screen.dart';
 import '../features/timer/timer_screen.dart';
+import '../features/trips/active_trip_screen.dart';
+import '../features/trips/new_trip_screen.dart';
+import '../features/trips/start_trip_screen.dart';
+import '../features/trips/trip_form_data.dart';
+import '../features/trips/trips_screen.dart';
 import 'api/providers.dart';
 import 'auth/app_lock.dart';
 import 'sentry/sentry_config.dart';
@@ -300,6 +305,25 @@ final routerProvider = Provider<GoRouter>((ref) {
             ],
           ),
           GoRoute(path: '/timer', builder: (_, __) => const TimerScreen()),
+          GoRoute(
+            path: '/trips',
+            builder: (_, __) => const TripsScreen(),
+            routes: [
+              GoRoute(
+                path: 'start',
+                builder: (_, __) => const StartTripScreen(),
+              ),
+              GoRoute(
+                path: 'active',
+                builder: (_, __) => const ActiveTripScreen(),
+              ),
+              GoRoute(
+                path: 'new',
+                builder: (_, s) =>
+                    NewTripScreen(draft: s.extra as TripDraft?),
+              ),
+            ],
+          ),
           GoRoute(
               path: '/settings', builder: (_, __) => const SettingsScreen()),
         ],

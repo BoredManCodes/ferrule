@@ -6,6 +6,7 @@ class MoreScreen extends StatelessWidget {
 
   static const _items = [
     _MoreItem('/timer', Icons.timer_outlined, 'Labour Timer'),
+    _MoreItem('/trips', Icons.route_outlined, 'Trips'),
     _MoreItem('/clients', Icons.business_outlined, 'Clients'),
     _MoreItem('/contacts', Icons.contacts_outlined, 'Contacts'),
     _MoreItem('/documents', Icons.description_outlined, 'Documents'),

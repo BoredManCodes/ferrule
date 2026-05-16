@@ -3,11 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/api/providers.dart';
 import '../../core/settings/app_settings.dart';
 import '../assets/asset_repository.dart';
 import '../clients/client_repository.dart';
 import '../credentials/credential_repository.dart';
 import '../tickets/ticket_repository.dart';
+import '../trips/active_trip.dart';
+import '../trips/trip_actions.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -24,6 +27,7 @@ class DashboardScreen extends ConsumerWidget {
       appBar: AppBar(
         title: Text(settings?.effectiveTitle ?? 'ITFlow'),
         actions: [
+          const _TripQuickAction(),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             onPressed: () => context.push('/settings'),
@@ -173,6 +177,34 @@ class DashboardScreen extends ConsumerWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _TripQuickAction extends ConsumerWidget {
+  const _TripQuickAction();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasWebCreds = ref.watch(itflowWebClientProvider) != null;
+    final active = ref.watch(activeTripProvider).value;
+    if (active != null) {
+      // Trip in progress — show a Stop button that opens the active-trip
+      // screen (where the actual stop logic runs). Pulses with the accent so
+      // it's easy to spot from the home page.
+      final scheme = Theme.of(context).colorScheme;
+      return IconButton(
+        tooltip: 'Trip in progress — tap to stop',
+        icon: Icon(Icons.stop_circle, color: scheme.error),
+        onPressed: () => context.push('/trips/active'),
+      );
+    }
+    return IconButton(
+      tooltip: hasWebCreds
+          ? 'Start trip'
+          : 'Add agent credentials in Settings to track trips',
+      icon: const Icon(Icons.play_circle_outline),
+      onPressed: hasWebCreds ? () => startTripFlow(context, ref) : null,
     );
   }
 }
