@@ -1,14 +1,8 @@
 <div align="center">
 
-```
-███████╗███████╗██████╗ ██████╗ ██╗   ██╗██╗     ███████╗
-██╔════╝██╔════╝██╔══██╗██╔══██╗██║   ██║██║     ██╔════╝
-█████╗  █████╗  ██████╔╝██████╔╝██║   ██║██║     █████╗
-██╔══╝  ██╔══╝  ██╔══██╗██╔══██╗██║   ██║██║     ██╔══╝
-██║     ███████╗██║  ██║██║  ██║╚██████╔╝███████╗███████╗
-╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝
-       a thin metal cap for your ITFlow backend
-```
+# Ferrule
+
+*a thin metal cap for your ITFlow backend*
 
 [![Play Store · closed testing](https://img.shields.io/badge/Play%20Store-closed%20testing-3ddc84?logo=googleplay&logoColor=white)](https://play.google.com/store/apps/details?id=au.com.bordertechsolutions.ferrule)
 [![Flutter](https://img.shields.io/badge/Flutter-stable-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
