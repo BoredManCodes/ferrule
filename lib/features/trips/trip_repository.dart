@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/providers.dart';
 import '../../core/services/location_service.dart';
+import 'trip.dart';
 import 'trip_form_data.dart';
 
 class TripRepository {
@@ -11,6 +12,11 @@ class TripRepository {
   Future<TripAddFormData> fetchAddForm() async {
     final web = requireWebClient(ref);
     return web.fetchTripAddForm();
+  }
+
+  Future<List<Trip>> fetchList() async {
+    final web = requireWebClient(ref);
+    return web.fetchTripList();
   }
 
   Future<void> add({
@@ -46,6 +52,11 @@ final tripAddFormProvider =
     FutureProvider.autoDispose<TripAddFormData>((ref) async {
   await ref.watch(credentialsProvider.future);
   return ref.read(tripRepositoryProvider).fetchAddForm();
+});
+
+final tripListProvider = FutureProvider.autoDispose<List<Trip>>((ref) async {
+  await ref.watch(credentialsProvider.future);
+  return ref.read(tripRepositoryProvider).fetchList();
 });
 
 final locationServiceProvider =

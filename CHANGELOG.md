@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.1 - 2026-05-16
+
+- Trips screen now lists your past trips below the active trip card. Pulls the all-time list from the ITFlow web UI (no v1 API for trips). Pull-to-refresh and newly logged trips appear automatically.
+
 ## 1.1.0 - 2026-05-16
 
 - New Trips section under More, with a quick start/stop button in the home AppBar so you can begin a trip without changing tabs.

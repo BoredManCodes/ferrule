@@ -82,6 +82,7 @@ class _NewTripScreenState extends ConsumerState<NewTripScreen> {
             clientId: _clientId,
             roundtrip: _roundtrip,
           );
+      ref.invalidate(tripListProvider);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Trip logged')),

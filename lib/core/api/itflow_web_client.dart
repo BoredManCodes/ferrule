@@ -8,6 +8,7 @@ import 'package:html/parser.dart' as html_parser;
 import '../../features/expenses/expense_form_data.dart';
 import '../../features/invoices/payment_form_data.dart';
 import '../../features/tickets/reply_model.dart';
+import '../../features/trips/trip.dart';
 import '../../features/trips/trip_form_data.dart';
 import 'api_response.dart';
 
@@ -884,6 +885,81 @@ class ItflowWebClient {
       clients: clients,
       defaultDriverId: defaultDriver,
     );
+  }
+
+  /// Scrapes `/agent/trips.php` for recent trips. ITFlow has no JSON endpoint
+  /// for trips, so we GET the agent listing page (forcing the all-time date
+  /// range so we don't get the default narrow window) and parse the table.
+  Future<List<Trip>> fetchTripList() async {
+    await _ensureLoggedIn();
+    Future<Response> doGet() => _dio.get(
+          '$_root/agent/trips.php',
+          queryParameters: {'canned_date': 'alltime'},
+          options: Options(
+            followRedirects: true,
+            maxRedirects: 5,
+            validateStatus: (s) => s != null && s < 500,
+          ),
+        );
+    var resp = await doGet();
+    var body = resp.data?.toString() ?? '';
+    if (body.contains('name="email"') && body.contains('name="password"')) {
+      _loggedIn = false;
+      _csrfToken = null;
+      await _ensureLoggedIn();
+      resp = await doGet();
+      body = resp.data?.toString() ?? '';
+    }
+
+    final doc = html_parser.parse(body);
+    final rows = doc.querySelectorAll('table tbody tr');
+    final out = <Trip>[];
+    for (final row in rows) {
+      final cells = row.querySelectorAll('td');
+      if (cells.length < 6) continue;
+
+      final firstA = cells[0].querySelector('a');
+      final modalUrl = firstA?.attributes['data-modal-url'] ?? '';
+      final idMatch = RegExp(r'id=(\d+)').firstMatch(modalUrl);
+      if (idMatch == null) continue;
+      final id = int.tryParse(idMatch.group(1)!);
+      if (id == null) continue;
+
+      final date = (firstA?.text ?? cells[0].text).trim();
+      final driver = cells[1].text.trim();
+      final purpose = cells[2].text.trim();
+      final source = cells[3].text.trim();
+      final destination = cells[4].text.trim();
+
+      final milesCell = cells[5];
+      final roundtrip = milesCell.querySelector('i.fa-sync-alt') != null;
+      final milesNum = RegExp(r'[\d.]+').firstMatch(milesCell.text);
+      final miles =
+          milesNum == null ? 0.0 : double.tryParse(milesNum.group(0)!) ?? 0.0;
+
+      // The client column is omitted when the page is filtered by client.
+      // Detect by total cell count: 8 cells means client column is present
+      // (Date, Driver, Purpose, Source, Destination, Miles, Client, Action);
+      // 7 cells means it's been filtered out.
+      String? clientName;
+      if (cells.length >= 8) {
+        final raw = cells[6].text.trim();
+        if (raw.isNotEmpty && raw != '-') clientName = raw;
+      }
+
+      out.add(Trip(
+        id: id,
+        date: date,
+        driver: driver,
+        purpose: purpose,
+        source: source,
+        destination: destination,
+        miles: miles,
+        roundtrip: roundtrip,
+        clientName: clientName,
+      ));
+    }
+    return out;
   }
 
   /// Submits the "New Trip" form. [clientId] = 0 means no client. [roundtrip]
