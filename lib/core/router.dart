@@ -56,6 +56,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       final atConsent = loc == '/consent';
       final atSetup = loc == '/setup';
       final atLock = loc == '/lock';
+      final atPrivacy = loc == '/privacy';
+      // Privacy policy is always reachable — it has to be readable before
+      // the user agrees to anything (consent, sign-in, app lock).
+      if (atPrivacy) return null;
       if (consentNeeded && !atConsent) return '/consent';
       if (!consentNeeded && atConsent) return loggedIn ? '/' : '/setup';
       if (!loggedIn && !atSetup && !atConsent) return '/setup';
@@ -71,6 +75,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           path: '/consent', builder: (_, __) => const CrashConsentScreen()),
       GoRoute(path: '/setup', builder: (_, __) => const SetupScreen()),
       GoRoute(path: '/lock', builder: (_, __) => const LockScreen()),
+      GoRoute(
+          path: '/privacy',
+          builder: (_, __) => const PrivacyPolicyScreen()),
       ShellRoute(
         builder: (context, state, child) => AppShell(child: child),
         routes: [
@@ -295,9 +302,6 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/timer', builder: (_, __) => const TimerScreen()),
           GoRoute(
               path: '/settings', builder: (_, __) => const SettingsScreen()),
-          GoRoute(
-              path: '/privacy',
-              builder: (_, __) => const PrivacyPolicyScreen()),
         ],
       ),
     ],

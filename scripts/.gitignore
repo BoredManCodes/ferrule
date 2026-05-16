@@ -3,4 +3,12 @@ node_modules/
 .oauth-token.json
 .release-notes.tmp.txt
 .release-*.log
-.promote-fail-*.png
+
+# Local-only debug/inspection screenshots
+.*.png
+
+# Local-only Play Console exploration/inspection scripts
+explore-closed-testing.mjs
+inspect-closed-testing.mjs
+promote-closed-testing.mjs
+send-for-review.mjs

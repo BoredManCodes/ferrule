@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/api/api_response.dart';
 import '../../core/api/itflow_client.dart';
 import '../../core/api/providers.dart';
 import '../../core/storage/secure_store.dart';
@@ -70,7 +71,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
             ),
           );
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = e is ApiException ? e.message : e.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -250,10 +251,10 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                             setState(() => _agentExpanded = !_agentExpanded),
                         children: [
                           Text(
-                            'The ITFlow v1 API doesn\'t expose endpoints for logging time on a ticket — that '
-                            'feature only exists in the web UI. To make the timer submit hours back to '
-                            'ITFlow, the app signs in as you in the background (using these credentials), '
-                            'grabs a CSRF token, and posts the reply exactly like the website would.',
+                            'ITFlow\'s API is missing a lot of endpoints — logging time on a ticket is '
+                            'one of them. So for anything the API can\'t do, the app signs in to your '
+                            'instance as an agent in the background and drives the web UI the same way '
+                            'you would. These credentials are what it uses to do that.',
                             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                   color: scheme.onSurfaceVariant,
                                   height: 1.4,
