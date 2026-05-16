@@ -1,31 +1,77 @@
-# Ferrule
+<div align="center">
 
-> *ferrule* (noun) - the metal sleeve crimped onto the end of a cable, pencil, or umbrella, used to bind the strands together and stop them fraying.
+```
+███████╗███████╗██████╗ ██████╗ ██╗   ██╗██╗     ███████╗
+██╔════╝██╔════╝██╔══██╗██╔══██╗██║   ██║██║     ██╔════╝
+█████╗  █████╗  ██████╔╝██████╔╝██║   ██║██║     █████╗
+██╔══╝  ██╔══╝  ██╔══██╗██╔══██╗██║   ██║██║     ██╔══╝
+██║     ███████╗██║  ██║██║  ██║╚██████╔╝███████╗███████╗
+╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝
+       a thin metal cap for your ITFlow backend
+```
 
-A cross-platform mobile and desktop client for [ITFlow](https://itflow.org), the open-source MSP/PSA platform. Ferrule is a thin cap over an ITFlow backend: it binds the loose ends (REST endpoints, agent CSRF flows, PDF exports, guest links) into one client surface without changing what's inside.
-
-Built with Flutter. Targets Android, iOS, and Windows from a single Dart codebase.
-
-[![Play Store - closed testing](https://img.shields.io/badge/Play%20Store-closed%20testing-3ddc84?logo=googleplay&logoColor=white)](https://play.google.com/store/apps/details?id=au.com.bordertechsolutions.ferrule)
+[![Play Store · closed testing](https://img.shields.io/badge/Play%20Store-closed%20testing-3ddc84?logo=googleplay&logoColor=white)](https://play.google.com/store/apps/details?id=au.com.bordertechsolutions.ferrule)
+[![Flutter](https://img.shields.io/badge/Flutter-stable-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
+[![Riverpod](https://img.shields.io/badge/Riverpod-3.x-0553B1)](https://riverpod.dev)
+[![Dart](https://img.shields.io/badge/Dart-3-0175C2?logo=dart&logoColor=white)](https://dart.dev)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Flutter](https://img.shields.io/badge/flutter-stable-02569B?logo=flutter)](https://flutter.dev)
+[![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)](https://github.com/BoredManCodes/ferrule/pulls)
 
-## What it does
+</div>
 
-| Area | Read | Create | Action |
-|---|---|---|---|
-| Clients, contacts, assets, credentials, tickets | yes | upstream-dependent | tap-through linking between every detail screen |
-| Invoices | yes (incl. line items) | no | download PDF, copy or open the guest-view link, Make Payment form |
-| Quotes | yes (incl. line items) | no | download PDF, copy or open the guest-view link |
-| Expenses | yes | yes (camera or file receipt upload) | - |
-| Products, vendors, locations, networks, certificates, software, documents, domains | yes | no | tap-through linking |
-| Tickets | yes | no | timer, reply view |
+```
+$ man ferrule
+NAME
+       ferrule - mobile/desktop client for an ITFlow MSP backend
 
-Detail screens cross-link related records: tap a client on an invoice, a contact on an asset, a credential on a ticket, and so on. Linked IDs render as names, not numbers.
+DESCRIPTION
+       A ferrule is the metal sleeve crimped onto the end of a
+       cable, pencil, or umbrella to keep the strands bound and
+       stop them fraying.
 
-## Architecture
+       This Ferrule does the same job for an ITFlow instance: it
+       binds the loose ends (REST endpoints, agent CSRF flows,
+       PDF exports, guest links) into one client surface without
+       changing what's inside.
 
-Ferrule talks to two surfaces of the same backend through one Dio client:
+SEE ALSO
+       itflow(1), flutter(1), make-coffee-first(1)
+```
+
+## `$ ferrule --what-does-it-do`
+
+```
+$ ls /modules
+clients/    contacts/   assets/        credentials/  tickets/
+invoices/   quotes/     expenses/      products/     vendors/
+locations/  networks/   certificates/  software/     documents/
+domains/    dashboard/  timer/
+
+$ stat invoices/
+  Read       full list + detail + line items
+  PDF        download via the OS share sheet
+  Guest      copy or open the shareable client URL
+  Action     Make Payment form (scrapes the agent modal for CSRF)
+
+$ stat quotes/
+  Read       full list + detail + line items
+  PDF        download via the OS share sheet
+  Guest      copy or open the shareable client URL
+
+$ stat expenses/
+  Read       full list + detail
+  Create     receipt upload (camera or file: jpg/png/gif/webp/pdf)
+
+$ stat everything-else/
+  Read       list + detail screens with linked-record tap-through
+             (clients <-> contacts <-> assets <-> credentials <-> tickets ...)
+```
+
+Tap a client on an invoice, a contact on an asset, a credential on a ticket - linked IDs render as names and behave like hyperlinks, not magic numbers.
+
+## `$ ferrule --how-does-it-work`
+
+Two surfaces of the same backend, one Dio client:
 
 ```
                 +-----------------------------+
@@ -45,85 +91,122 @@ Ferrule talks to two surfaces of the same backend through one Dio client:
                 +--------------------------------+
 ```
 
-- **REST** (`/api/v1/*`): module reads. Clean, paginated, scoped to an API key's client.
-- **Agent scrape** (`/agent/*`): everything the REST API doesn't cover. CSRF token harvested from the rendered modal, session retry on lapse, multipart POSTs for things like `add_expense`.
+- **REST** (`/api/v1/*`): clean, paginated, scoped to an API key's client. Used wherever an endpoint exists.
+- **Agent scrape** (`/agent/*`): everything REST doesn't cover. CSRF harvested from the rendered modal, session retry on lapse, multipart POSTs for things like `add_expense`.
 
-This split is why some features need to land on both repos at once: when REST doesn't expose what the app needs, the fork below ships the endpoint and Ferrule consumes it.
+When REST doesn't expose what the app needs, the fork below ships the endpoint and Ferrule eats it for breakfast.
 
-## Backend (PHP fork)
+## `$ ferrule --backend`
 
-API additions for things the upstream ITFlow REST API doesn't yet expose live in [BoredManCodes/itflow](https://github.com/BoredManCodes/itflow):
+API additions live in [BoredManCodes/itflow](https://github.com/BoredManCodes/itflow):
 
-- `GET /api/v1/quote_items/read.php` - line items for a quote, JOINed to `quotes` for client scope.
-- `GET /api/v1/ticket_replies/read.php` and `POST /api/v1/ticket_replies/create.php` - read and create ticket conversation replies.
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/v1/quote_items/read.php` | Line items for a quote, JOINed to `quotes` for client scope |
+| `GET /api/v1/ticket_replies/read.php` | Conversation replies for a ticket |
+| `POST /api/v1/ticket_replies/create.php` | Post a new reply to a ticket |
 
-All additions are designed to be upstreamable and follow the existing `validate_api_key.php` + `LIKE '$client_id'` scoping conventions.
+All additions follow the existing `validate_api_key.php` + `LIKE '$client_id'` scoping pattern and are designed to be upstreamable.
 
-## Setup
+## `$ ferrule --install`
 
-The app reads build-time config (Sentry DSN, environment name) from a local `secrets.json`, which is **not** checked in.
+```pwsh
+# 1. clone
+git clone https://github.com/BoredManCodes/ferrule.git
+cd ferrule
 
-```bash
-cp secrets.example.json secrets.json   # fill in your Sentry DSN, or leave blank to disable
+# 2. config (leave Sentry blank to disable)
+cp secrets.example.json secrets.json
+
+# 3. run
 flutter pub get
 flutter run --dart-define-from-file=secrets.json
 ```
 
-To build a release Android App Bundle:
+Release builds:
 
-```bash
-flutter build appbundle --dart-define-from-file=secrets.json
-```
-
-To build a release APK:
-
-```bash
-flutter build apk --dart-define-from-file=secrets.json
+```pwsh
+flutter build appbundle --dart-define-from-file=secrets.json   # Play / closed testing
+flutter build apk       --dart-define-from-file=secrets.json   # sideload
+flutter build windows   --dart-define-from-file=secrets.json   # desktop
 ```
 
 ### First-run flow
 
 1. Enter your ITFlow base URL and API key.
-2. (Optional) Add agent email + password to unlock the scrape-only features (Make Payment, PDF downloads, expense create).
-3. (Optional) Enable biometric unlock on launch (off by default).
-4. Done. The app caches everything to secure storage; you won't be asked again.
+2. *(Optional)* Add agent email + password to unlock scrape-only features (Make Payment, PDF downloads, expense create).
+3. *(Optional)* Turn on biometric unlock at launch. Off by default.
+4. Done. Everything caches to secure storage; you won't be asked again.
 
 ### QR scanner
 
-The lookup format expected is `assetid_customer_installdate`, e.g. `000037_bordertechsolutions_0126`. That's the label format my business prints, so it won't match generic QR codes out of the box.
+Asset lookup expects `assetid_customer_installdate`, e.g. `000037_bordertechsolutions_0126`. That's the label format my business prints, so generic QR codes won't match out of the box.
 
-## Releasing
+## `$ ferrule --release`
 
-Closed-testing releases ship through a self-contained PowerShell + Node pipeline in `scripts/`.
+Closed-testing ships through a self-contained PowerShell + Node pipeline in `scripts/`:
 
 ```pwsh
-# Build the AAB, upload to Play Console alpha track as a draft.
+# 1. build + upload to Play alpha as a draft
 .\scripts\release-internal.ps1 -Track alpha -NoPromote
 
-# Save the draft and Send for review on Publishing overview (Playwright-driven Chromium).
-node .\scripts\promote-closed-testing.mjs --track <track-id> --release-name 1.0.2 --version-code 6
+# 2. Save + Send for review (Playwright drives Chromium)
+node .\scripts\promote-closed-testing.mjs `
+  --track <track-id> `
+  --release-name 1.0.2 `
+  --version-code 6
 ```
 
-The promote script handles the bit the Android Publisher API doesn't expose: clicking **Edit release -> Next -> Save** on the review page, then **Send for review** on Publishing overview. One command from `git push` to "in front of Google reviewers".
+The promote script handles the part the Android Publisher API doesn't expose: **Edit release -> Next -> Save** on the review page, then **Send for review** on Publishing overview. One command from `git push` to "queued for Google review". Took an afternoon to write, saves twenty minutes per release.
 
-Internal-testing flow (`-Track internal`, no `-NoPromote`) uses `scripts/promote-via-browser.mjs` instead, which clicks **Save and publish** for an immediate roll-out.
+Internal testing? Same `release-internal.ps1` without `-NoPromote`. `scripts/promote-via-browser.mjs` clicks **Save and publish** for an immediate roll-out.
 
-## Stack
+## `$ ferrule --stack`
 
-- **Frontend**: Flutter, Dart 3, [Riverpod 3](https://riverpod.dev), [GoRouter](https://pub.dev/packages/go_router)
-- **HTTP**: [Dio](https://pub.dev/packages/dio) + `dio_cookie_manager`, [html](https://pub.dev/packages/html) for parsing scraped pages
-- **Storage**: [flutter_secure_storage](https://pub.dev/packages/flutter_secure_storage)
-- **Auth**: [local_auth](https://pub.dev/packages/local_auth) for biometrics
-- **Telemetry**: [sentry_flutter](https://pub.dev/packages/sentry_flutter) (opt-in)
-- **Camera & files**: [mobile_scanner](https://pub.dev/packages/mobile_scanner), [image_picker](https://pub.dev/packages/image_picker), [file_picker](https://pub.dev/packages/file_picker)
-- **Sharing**: [share_plus](https://pub.dev/packages/share_plus), [path_provider](https://pub.dev/packages/path_provider)
+| Layer | Bits |
+|---|---|
+| Framework | Flutter, Dart 3 |
+| State | [Riverpod 3](https://riverpod.dev) (async caching, autoDispose families) |
+| Routing | [GoRouter](https://pub.dev/packages/go_router) (typed deep links) |
+| HTTP | [Dio](https://pub.dev/packages/dio) + `dio_cookie_manager`, [html](https://pub.dev/packages/html) parser |
+| Storage | [flutter_secure_storage](https://pub.dev/packages/flutter_secure_storage) (keychain / Keystore) |
+| Auth | [local_auth](https://pub.dev/packages/local_auth) for biometrics |
+| Telemetry | [sentry_flutter](https://pub.dev/packages/sentry_flutter), opt-in |
+| Capture | [mobile_scanner](https://pub.dev/packages/mobile_scanner), [image_picker](https://pub.dev/packages/image_picker), [file_picker](https://pub.dev/packages/file_picker) |
+| Share | [share_plus](https://pub.dev/packages/share_plus), [path_provider](https://pub.dev/packages/path_provider) |
 
-## Privacy
+## `$ ferrule --privacy`
 
-All network traffic goes to **your** ITFlow instance and nowhere else, except optional Sentry crash reports if you've configured a DSN. The privacy policy is bundled as `PRIVACY.md` and renders in-app at *Settings -> Privacy policy* so it works offline.
+```
+$ traceroute your.data
+ 1  your.itflow.instance  (the only hop)
+ 2  *  *  *
+ 3  *  *  *
+```
 
-## License
+All network traffic goes to **your** ITFlow instance and nowhere else, except optional Sentry crash reports if you've configured a DSN. The privacy policy is bundled as `PRIVACY.md` and renders in-app at *Settings -> Privacy policy* so it works offline and survives a GitHub outage.
 
-Licensed under [Apache 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
+## `$ ferrule --easter-eggs`
 
-This is an unofficial client and is **not affiliated with or endorsed by** the ITFlow project. ITFlow itself is an independent open-source project licensed under GPL-3.0; no ITFlow source code is included in or redistributed by this client.
+```
+$ history | grep -i easter
+```
+
+There's at least one. The other one is reading the source. Pull requests welcome.
+
+## `$ ferrule --license`
+
+Apache 2.0 - see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+Unofficial client. **Not affiliated with or endorsed by** the ITFlow project. ITFlow itself is an independent open-source project licensed under GPL-3.0; no ITFlow source code is included in or redistributed by this client.
+
+---
+
+<div align="center">
+
+```
+guest@ferrule:~$ exit
+Connection to ferrule closed. Have a good one.
+```
+
+</div>
