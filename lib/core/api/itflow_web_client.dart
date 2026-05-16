@@ -6,6 +6,7 @@ import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:html/parser.dart' as html_parser;
 
 import '../../features/expenses/expense_form_data.dart';
+import '../../features/invoices/payment_form_data.dart';
 import '../../features/tickets/reply_model.dart';
 import 'api_response.dart';
 
@@ -797,5 +798,237 @@ class ItflowWebClient {
       throw ApiException(
           'Server rejected the request — try logging out and back in.');
     }
+  }
+
+  /// Loads the "Make Payment" modal for an invoice and parses out everything
+  /// the form needs: CSRF token, current balance + currency, accounts and
+  /// payment-method dropdowns. Mirrors [fetchExpenseAddForm].
+  Future<PaymentAddFormData> fetchInvoicePaymentForm(int invoiceId) async {
+    await _ensureLoggedIn();
+    Future<Response> doGet() => _dio.get(
+          '$_root/agent/modals/payment/payment_add.php',
+          queryParameters: {'id': invoiceId},
+          options: Options(
+            followRedirects: true,
+            maxRedirects: 5,
+            validateStatus: (s) => s != null && s < 500,
+          ),
+        );
+    var resp = await doGet();
+    var raw = resp.data;
+    final bodyStr = raw is String ? raw : (raw?.toString() ?? '');
+    if (bodyStr.contains('name="email"') &&
+        bodyStr.contains('name="password"')) {
+      _loggedIn = false;
+      _csrfToken = null;
+      await _ensureLoggedIn();
+      resp = await doGet();
+      raw = resp.data;
+    }
+
+    String htmlContent;
+    if (raw is Map && raw['content'] is String) {
+      htmlContent = raw['content'] as String;
+    } else {
+      final s = raw is String ? raw : (raw?.toString() ?? '');
+      try {
+        final decoded = jsonDecode(s);
+        if (decoded is Map && decoded['content'] is String) {
+          htmlContent = decoded['content'] as String;
+        } else {
+          htmlContent = s;
+        }
+      } catch (_) {
+        htmlContent = s;
+      }
+    }
+
+    final doc = html_parser.parse(htmlContent);
+    final csrf =
+        doc.querySelector('input[name="csrf_token"]')?.attributes['value'];
+    if (csrf == null || csrf.isEmpty) {
+      throw ApiException(
+          'Could not load payment form — missing CSRF token.');
+    }
+
+    String hidden(String name) =>
+        doc.querySelector('input[name="$name"]')?.attributes['value'] ?? '';
+    final balance = double.tryParse(hidden('balance')) ?? 0.0;
+    final currency = hidden('currency_code');
+
+    // Invoice label is rendered in the modal title: "<prefix><number>: Make Payment"
+    final title = doc.querySelector('.modal-title')?.text.trim() ?? '';
+    final labelMatch = RegExp(r'^(.+?):\s*Make Payment').firstMatch(title);
+    final invoiceLabel = labelMatch?.group(1)?.trim() ?? 'Invoice #$invoiceId';
+
+    final accounts = <NamedOption>[];
+    int? defaultAccount;
+    final acctSel = doc.querySelector('select[name="account"]');
+    if (acctSel != null) {
+      for (final opt in acctSel.querySelectorAll('option')) {
+        final value = opt.attributes['value'] ?? '';
+        final id = int.tryParse(value);
+        if (id == null || id == 0) continue;
+        var label = opt.text.trim().replaceAll(RegExp(r'\s+'), ' ');
+        if (label.isEmpty) label = 'Account #$id';
+        accounts.add(NamedOption(id: id, name: label));
+        if (opt.attributes.containsKey('selected')) {
+          defaultAccount = id;
+        }
+      }
+    }
+
+    final methods = <String>[];
+    String? defaultMethod;
+    final methodSel = doc.querySelector('select[name="payment_method"]');
+    if (methodSel != null) {
+      for (final opt in methodSel.querySelectorAll('option')) {
+        // Payment methods submit by option text — no `value=` attribute on
+        // real entries. Skip the "- Method of Payment -" placeholder, which
+        // has value="".
+        final value = opt.attributes['value'];
+        final text = opt.text.trim();
+        if (text.isEmpty || (value != null && value.isEmpty && text.startsWith('-'))) {
+          continue;
+        }
+        methods.add(text);
+        if (opt.attributes.containsKey('selected')) {
+          defaultMethod = text;
+        }
+      }
+    }
+
+    return PaymentAddFormData(
+      csrfToken: csrf,
+      invoiceId: invoiceId,
+      invoiceLabel: invoiceLabel,
+      balance: balance,
+      currencyCode: currency,
+      accounts: accounts,
+      paymentMethods: methods,
+      defaultAccountId: defaultAccount,
+      defaultPaymentMethod: defaultMethod,
+    );
+  }
+
+  /// Submits the "Make Payment" form to the agent post handler.
+  Future<void> addInvoicePayment({
+    required String csrfToken,
+    required int invoiceId,
+    required double balance,
+    required String currencyCode,
+    required String date,
+    required double amount,
+    required int accountId,
+    required String paymentMethod,
+    String reference = '',
+    bool emailReceipt = false,
+  }) async {
+    await _ensureLoggedIn();
+    String currentCsrf = csrfToken;
+
+    FormData build() {
+      return FormData.fromMap({
+        'add_payment': '1',
+        'csrf_token': currentCsrf,
+        'invoice_id': invoiceId,
+        'balance': balance.toStringAsFixed(2),
+        'currency_code': currencyCode,
+        'date': date,
+        'amount': amount.toStringAsFixed(2),
+        'account': accountId,
+        'payment_method': paymentMethod,
+        'reference': reference,
+        if (emailReceipt) 'email_receipt': '1',
+      });
+    }
+
+    Future<Response> doPost() => _dio.post(
+          '$_root/agent/post.php',
+          data: build(),
+          options: Options(
+            contentType: Headers.formUrlEncodedContentType,
+            followRedirects: false,
+            validateStatus: (s) => s != null && s < 500,
+          ),
+        );
+
+    var resp = await doPost();
+    if (resp.statusCode == 302) {
+      final loc = resp.headers.value('location') ?? '';
+      if (loc.toLowerCase().contains('login.php')) {
+        _loggedIn = false;
+        _csrfToken = null;
+        await _ensureLoggedIn();
+        currentCsrf = await _getCsrf();
+        resp = await doPost();
+      }
+    }
+
+    if (resp.statusCode == null ||
+        (resp.statusCode! >= 300 && resp.statusCode != 302)) {
+      throw ApiException('Payment submission failed (status ${resp.statusCode}).',
+          statusCode: resp.statusCode);
+    }
+
+    final loc = resp.headers.value('location') ?? '';
+    if (loc.toLowerCase().endsWith('/index.php') ||
+        loc.toLowerCase().contains('login.php')) {
+      throw ApiException(
+          'Server rejected the payment — try logging out and back in.');
+    }
+    // ITFlow validates `amount > balance` on the server and flashes an error
+    // back via session — there's no machine-readable response. The redirect
+    // alone is treated as success here.
+  }
+
+  /// Downloads an invoice PDF from the agent post.php endpoint.
+  /// ITFlow validates the CSRF token against the session, so this can't be
+  /// constructed as a public URL — it has to be requested by the same
+  /// authenticated session that issued the token. Returns raw PDF bytes.
+  Future<List<int>> downloadInvoicePdf(int invoiceId) =>
+      _downloadPdf('export_invoice_pdf', invoiceId);
+
+  /// Downloads a quote PDF using the same auth dance as [downloadInvoicePdf].
+  Future<List<int>> downloadQuotePdf(int quoteId) =>
+      _downloadPdf('export_quote_pdf', quoteId);
+
+  Future<List<int>> _downloadPdf(String param, int id) async {
+    await _ensureLoggedIn();
+    final csrf = await _getCsrf();
+    final url = '$_root/agent/post.php?$param=$id&csrf_token=$csrf';
+    final resp = await _dio.get<List<int>>(
+      url,
+      options: Options(
+        responseType: ResponseType.bytes,
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
+    final loc = resp.headers.value('location') ?? '';
+    if (resp.statusCode == 302 &&
+        (loc.toLowerCase().contains('login.php') ||
+            loc.toLowerCase().endsWith('/index.php'))) {
+      // Session/CSRF was rejected — force a re-login and retry once.
+      _loggedIn = false;
+      _csrfToken = null;
+      await _ensureLoggedIn();
+      final csrf2 = await _getCsrf();
+      final retry = await _dio.get<List<int>>(
+        '$_root/agent/post.php?$param=$id&csrf_token=$csrf2',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final data = retry.data;
+      if (data == null || data.isEmpty) {
+        throw ApiException('Empty PDF response from server.');
+      }
+      return data;
+    }
+    final data = resp.data;
+    if (resp.statusCode != 200 || data == null || data.isEmpty) {
+      throw ApiException(
+          'Failed to download PDF (status ${resp.statusCode}).');
+    }
+    return data;
   }
 }

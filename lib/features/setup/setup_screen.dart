@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/api/itflow_client.dart';
 import '../../core/api/providers.dart';
@@ -327,11 +327,7 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                       const SizedBox(height: 12),
                       Center(
                         child: TextButton.icon(
-                          onPressed: () => launchUrl(
-                            Uri.parse(
-                                'https://github.com/BoredManCodes/ferrule/blob/main/PRIVACY.md'),
-                            mode: LaunchMode.externalApplication,
-                          ),
+                          onPressed: () => context.push('/privacy'),
                           icon: const Icon(Icons.policy_outlined, size: 16),
                           label: const Text('Privacy policy'),
                           style: TextButton.styleFrom(

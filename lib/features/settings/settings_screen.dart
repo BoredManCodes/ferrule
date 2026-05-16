@@ -220,14 +220,9 @@ class SettingsScreen extends ConsumerWidget {
           ListTile(
             leading: const Icon(Icons.policy_outlined),
             title: const Text('Privacy policy'),
-            subtitle: const Text(
-                'How Ferrule handles your data — opens on GitHub'),
-            trailing: const Icon(Icons.open_in_new, size: 18),
-            onTap: () => launchUrl(
-              Uri.parse(
-                  'https://github.com/BoredManCodes/ferrule/blob/main/PRIVACY.md'),
-              mode: LaunchMode.externalApplication,
-            ),
+            subtitle: const Text('How Ferrule handles your data'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/privacy'),
           ),
           const Divider(),
           ListTile(

@@ -14,6 +14,7 @@ class Credential {
   final int? contactId;
   final int? assetId;
   final int? clientId;
+  final int? vendorId;
   final DateTime? passwordChangedAt;
   final Map<String, dynamic> raw;
 
@@ -31,6 +32,7 @@ class Credential {
     this.contactId,
     this.assetId,
     this.clientId,
+    this.vendorId,
     this.passwordChangedAt,
     this.raw = const {},
   });
@@ -49,6 +51,7 @@ class Credential {
         contactId: toInt(r['credential_contact_id']),
         assetId: toInt(r['credential_asset_id']),
         clientId: toInt(r['credential_client_id']),
+        vendorId: toInt(r['credential_vendor_id']),
         passwordChangedAt: toDate(r['credential_password_changed_at']),
         raw: r,
       );

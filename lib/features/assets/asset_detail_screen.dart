@@ -5,6 +5,10 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/widgets.dart';
+import '../clients/client_repository.dart';
+import '../contacts/contact_repository.dart';
+import '../credentials/credential_model.dart';
+import '../credentials/credential_repository.dart';
 import 'asset_repository.dart';
 
 class AssetDetailScreen extends ConsumerWidget {
@@ -175,6 +179,11 @@ class AssetDetailScreen extends ConsumerWidget {
                   ),
                 ),
               ],
+              _AssignmentSection(
+                clientId: asset.clientId,
+                contactId: asset.contactId,
+              ),
+              _RelatedCredentialsSection(assetId: asset.id),
               if (asset.notes != null) ...[
                 const SectionHeader('Notes'),
                 Padding(
@@ -224,5 +233,115 @@ class AssetDetailScreen extends ConsumerWidget {
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(r.error ?? 'Failed to delete')));
     }
+  }
+}
+
+class _AssignmentSection extends ConsumerWidget {
+  final int? clientId;
+  final int? contactId;
+  const _AssignmentSection({required this.clientId, required this.contactId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasClient = clientId != null && clientId != 0;
+    final hasContact = contactId != null && contactId != 0;
+    if (!hasClient && !hasContact) return const SizedBox.shrink();
+
+    final clientAsync =
+        hasClient ? ref.watch(clientProvider(clientId!)) : null;
+    final contactAsync =
+        hasContact ? ref.watch(contactProvider(contactId!)) : null;
+    final contact = contactAsync?.value;
+
+    final rows = <Widget>[];
+    if (hasClient) {
+      rows.add(KeyValueTile(
+        label: 'Client',
+        value: clientAsync?.value?.name ?? '#$clientId',
+        icon: Icons.business_outlined,
+        onTap: () => context.push('/clients/$clientId'),
+        trailing: const Icon(Icons.chevron_right, size: 18),
+      ));
+    }
+    if (hasContact) {
+      rows.add(KeyValueTile(
+        label: 'Contact',
+        value: contact?.name ?? '#$contactId',
+        icon: Icons.person_outline,
+        onTap: () => context.push('/contacts/$contactId'),
+        trailing: const Icon(Icons.chevron_right, size: 18),
+      ));
+      if (contact?.email != null) {
+        rows.add(KeyValueTile(
+          label: 'Email',
+          value: contact!.email!,
+          icon: Icons.mail_outline,
+          onTap: () => launchUrl(Uri.parse('mailto:${contact.email}')),
+        ));
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('Assignment'),
+        Card(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(children: rows),
+        ),
+      ],
+    );
+  }
+}
+
+class _RelatedCredentialsSection extends ConsumerWidget {
+  final int assetId;
+  const _RelatedCredentialsSection({required this.assetId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(credentialsListProvider);
+    final loading = async.isLoading;
+    final List<Credential> creds = async.value?.items
+            .where((c) => c.assetId == assetId)
+            .toList() ??
+        const <Credential>[];
+    if (!loading && creds.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader(
+            'Credentials${creds.isNotEmpty ? ' (${creds.length})' : ''}'),
+        if (loading && creds.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: LinearProgressIndicator(),
+          )
+        else
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                for (var i = 0; i < creds.length; i++) ...[
+                  if (i > 0) const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.vpn_key_outlined),
+                    title: Text(creds[i].name ?? '(unnamed)'),
+                    subtitle: Text([
+                      creds[i].username,
+                      creds[i].description,
+                    ]
+                        .map((s) => s?.toString().trim() ?? '')
+                        .where((s) => s.isNotEmpty)
+                        .join(' • ')),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => context.push('/credentials/${creds[i].id}'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+      ],
+    );
   }
 }

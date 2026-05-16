@@ -16,9 +16,11 @@ import '../features/credentials/credential_form_screen.dart';
 import '../features/credentials/credentials_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/expenses/expense_form_screen.dart';
+import '../features/invoices/payment_form_screen.dart';
 import '../features/lock/lock_screen.dart';
 import '../features/more/more_screen.dart';
 import '../features/readonly/readonly_screens.dart';
+import '../features/settings/privacy_policy_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/setup/setup_screen.dart';
 import '../features/shell/app_shell.dart';
@@ -191,6 +193,11 @@ final routerProvider = Provider<GoRouter>((ref) {
                 builder: (_, s) => InvoiceDetailScreen(
                     id: int.parse(s.pathParameters['id']!)),
               ),
+              GoRoute(
+                path: ':id/pay',
+                builder: (_, s) => PaymentFormScreen(
+                    invoiceId: int.parse(s.pathParameters['id']!)),
+              ),
             ],
           ),
           GoRoute(
@@ -288,6 +295,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(path: '/timer', builder: (_, __) => const TimerScreen()),
           GoRoute(
               path: '/settings', builder: (_, __) => const SettingsScreen()),
+          GoRoute(
+              path: '/privacy',
+              builder: (_, __) => const PrivacyPolicyScreen()),
         ],
       ),
     ],

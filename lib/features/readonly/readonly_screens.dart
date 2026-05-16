@@ -1,13 +1,25 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api/providers.dart';
 import '../../core/util.dart';
 import '../../core/widgets.dart';
+import '../clients/client_model.dart';
+import '../clients/client_repository.dart';
+import '../contacts/contact_model.dart';
+import '../contacts/contact_repository.dart';
+import '../expenses/expense_repository.dart';
+import '../tickets/ticket_model.dart';
+import '../tickets/ticket_repository.dart';
 
 // ===========================================================================
 // Providers
@@ -56,6 +68,43 @@ void invalidateModuleList(WidgetRef ref, String module) {
   ref.invalidate(_listProvider(module));
 }
 
+/// Line items belonging to a single invoice, in display order.
+final _invoiceItemsProvider = FutureProvider.autoDispose
+    .family<List<Map<String, dynamic>>, int>((ref, invoiceId) =>
+        _fetchItems(ref, module: 'invoice_items', idField: 'invoice_id', id: invoiceId));
+
+/// Line items belonging to a single quote, in display order.
+final _quoteItemsProvider = FutureProvider.autoDispose
+    .family<List<Map<String, dynamic>>, int>((ref, quoteId) =>
+        _fetchItems(ref, module: 'quote_items', idField: 'quote_id', id: quoteId));
+
+Future<List<Map<String, dynamic>>> _fetchItems(
+  Ref ref, {
+  required String module,
+  required String idField,
+  required int id,
+}) async {
+  await ref.watch(credentialsProvider.future);
+  final client = requireClient(ref);
+  const pageSize = 200;
+  final out = <Map<String, dynamic>>[];
+  var offset = 0;
+  while (true) {
+    final resp = await client.get(module, 'read', query: {
+      idField: id,
+      'limit': pageSize,
+      'offset': offset,
+    });
+    if (!resp.success) break;
+    final rows = resp.rows;
+    if (rows.isEmpty) break;
+    out.addAll(rows);
+    if (rows.length < pageSize) break;
+    offset += pageSize;
+  }
+  return out;
+}
+
 final _rowProvider = FutureProvider.autoDispose
     .family<Map<String, dynamic>?, _RowKey>((ref, k) async {
   await ref.watch(credentialsProvider.future);
@@ -65,6 +114,121 @@ final _rowProvider = FutureProvider.autoDispose
   if (!resp.success) return null;
   return resp.row;
 });
+
+// ===========================================================================
+// Name resolution — turns linked IDs (client_id, vendor_id, ...) into names
+// by piggy-backing on the cached _listProvider for the target module. The
+// list provider is autoDispose but stays alive while any detail screen is
+// watching it, so navigating between detail rows only fetches each module
+// once.
+// ===========================================================================
+
+class _NamesKey {
+  final String module;
+  final String idField;
+  final String nameField;
+  const _NamesKey(this.module, this.idField, this.nameField);
+  @override
+  bool operator ==(Object other) =>
+      other is _NamesKey &&
+      other.module == module &&
+      other.idField == idField &&
+      other.nameField == nameField;
+  @override
+  int get hashCode => Object.hash(module, idField, nameField);
+}
+
+final _namesProvider = FutureProvider.autoDispose
+    .family<Map<int, String>, _NamesKey>((ref, k) async {
+  final rows = await ref.watch(_listProvider(k.module).future);
+  final out = <int, String>{};
+  for (final r in rows) {
+    final id = toInt(r[k.idField]);
+    if (id == null || id == 0) continue;
+    final name = str(r[k.nameField]);
+    if (name != null) out[id] = name;
+  }
+  return out;
+});
+
+const _clientNames =
+    _NamesKey('clients', 'client_id', 'client_name');
+const _vendorNames =
+    _NamesKey('vendors', 'vendor_id', 'vendor_name');
+const _contactNames =
+    _NamesKey('contacts', 'contact_id', 'contact_name');
+const _locationNames =
+    _NamesKey('locations', 'location_id', 'location_name');
+const _domainNames =
+    _NamesKey('domains', 'domain_id', 'domain_name');
+
+/// Scraped from the web admin's "New Expense" modal — gives us name lookups
+/// for expense categories + accounts (which the v1 REST API doesn't expose).
+/// Returns empty maps when web credentials are missing or the scrape fails,
+/// so callers can degrade gracefully to "#<id>".
+final _expenseAdminLookupsProvider = FutureProvider.autoDispose<
+    ({Map<int, String> categories, Map<int, String> accounts})>((ref) async {
+  try {
+    final form = await ref.watch(expenseAddFormProvider.future);
+    return (
+      categories: {for (final o in form.categories) o.id: o.name},
+      accounts: {for (final o in form.accounts) o.id: o.name},
+    );
+  } catch (_) {
+    return (
+      categories: const <int, String>{},
+      accounts: const <int, String>{},
+    );
+  }
+});
+
+/// Builds a KeyValueTile for foreign-key ids using a pre-fetched lookup map.
+/// Used for category/account fields where the lookup source isn't a generic
+/// REST module list ([[_kvLookup]]) but a scraped admin-form options list.
+Widget? _kvFromMap(
+  String label,
+  dynamic id,
+  IconData icon,
+  Map<int, String> map,
+) {
+  final i = toInt(id);
+  if (i == null || i == 0) return null;
+  final resolved = map[i];
+  return KeyValueTile(
+    label: label,
+    value: resolved ?? '#$i',
+    icon: icon,
+  );
+}
+
+/// Renders a KeyValueTile that resolves a foreign-key id to the target
+/// entity's name, optionally making the row tappable to navigate to its
+/// detail screen. Falls back to `#<id>` while loading or if the row is
+/// missing/archived/unreadable.
+Widget? _kvLookup(
+  BuildContext context,
+  WidgetRef ref,
+  String label,
+  dynamic id,
+  IconData icon, {
+  required _NamesKey names,
+  String? route,
+}) {
+  final i = toInt(id);
+  if (i == null || i == 0) return null;
+  final async = ref.watch(_namesProvider(names));
+  final resolved = async.value?[i];
+  final display = resolved ?? '#$i';
+  return KeyValueTile(
+    label: label,
+    value: display,
+    icon: icon,
+    onTap: route == null ? null : () => context.push('$route/$i'),
+    trailing: route == null
+        ? null
+        : const Icon(Icons.chevron_right, size: 18),
+  );
+}
 
 // ===========================================================================
 // Shared helpers
@@ -183,6 +347,15 @@ Future<void> _open(String s) async {
   if (!u.contains('://')) u = 'https://$u';
   final uri = Uri.tryParse(u);
   if (uri != null) await launchUrl(uri);
+}
+
+/// Returns the configured ITFlow instance URL with any trailing slash stripped,
+/// or null if no credentials are stored. Used to compose URLs that the API
+/// returns as bare filenames or relative paths (e.g. expense receipt files).
+String? _instanceRoot(WidgetRef ref) {
+  final url = ref.read(credentialsProvider).value?.instanceUrl;
+  if (url == null || url.isEmpty) return null;
+  return url.endsWith('/') ? url.substring(0, url.length - 1) : url;
 }
 
 String _money(dynamic amount, [dynamic code]) {
@@ -617,7 +790,9 @@ class DocumentDetailScreen extends StatelessWidget {
                   toBool(r['document_client_visible']) ? 'Yes' : 'No',
                   Icons.visibility_outlined),
               _kv('Folder ID', r['document_folder_id'], Icons.folder_outlined),
-              _kv('Client ID', r['document_client_id'], Icons.business_outlined),
+              _kvLookup(c, ref, 'Client', r['document_client_id'],
+                  Icons.business_outlined,
+                  names: _clientNames, route: '/clients'),
             ]),
             if (content != null) ...[
               _LongTextSection(title: 'Content', value: content),
@@ -871,10 +1046,12 @@ class LocationDetailScreen extends StatelessWidget {
                   icon: Icons.print_outlined,
                 ),
               _kv('Hours', r['location_hours'], Icons.access_time),
-              _kv('Contact ID', r['location_contact_id'],
-                  Icons.contacts_outlined),
-              _kv('Client ID', r['location_client_id'],
-                  Icons.business_outlined),
+              _kvLookup(c, ref, 'Contact', r['location_contact_id'],
+                  Icons.contacts_outlined,
+                  names: _contactNames, route: '/contacts'),
+              _kvLookup(c, ref, 'Client', r['location_client_id'],
+                  Icons.business_outlined,
+                  names: _clientNames, route: '/clients'),
             ]),
             if (str(r['location_notes']) != null)
               _LongTextSection(
@@ -958,10 +1135,12 @@ class NetworkDetailScreen extends StatelessWidget {
                   Icons.swap_horiz_outlined),
             ]),
             _section('Associations', [
-              _kv('Location ID', r['network_location_id'],
-                  Icons.location_on_outlined),
-              _kv('Client ID', r['network_client_id'],
-                  Icons.business_outlined),
+              _kvLookup(c, ref, 'Location', r['network_location_id'],
+                  Icons.location_on_outlined,
+                  names: _locationNames, route: '/locations'),
+              _kvLookup(c, ref, 'Client', r['network_client_id'],
+                  Icons.business_outlined,
+                  names: _clientNames, route: '/clients'),
             ]),
             if (str(r['network_notes']) != null)
               _LongTextSection(
@@ -1058,9 +1237,12 @@ class SoftwareDetailScreen extends StatelessWidget {
                   'Expires', r['software_expire'], Icons.event_outlined),
             ]),
             _section('Associations', [
-              _kv('Vendor ID', r['software_vendor_id'], Icons.store_outlined),
-              _kv('Client ID', r['software_client_id'],
-                  Icons.business_outlined),
+              _kvLookup(c, ref, 'Vendor', r['software_vendor_id'],
+                  Icons.store_outlined,
+                  names: _vendorNames, route: '/vendors'),
+              _kvLookup(c, ref, 'Client', r['software_client_id'],
+                  Icons.business_outlined,
+                  names: _clientNames, route: '/clients'),
             ]),
             if (str(r['software_notes']) != null)
               _LongTextSection(
@@ -1127,45 +1309,47 @@ class VendorDetailScreen extends StatelessWidget {
           final email = str(r['vendor_email']);
           final website = str(r['vendor_website']);
           return [
-            _section('Contact', [
-              _kv('Contact name', r['vendor_contact_name'],
+            _section('Details', [
+              _kv('Account Number', r['vendor_account_number'],
+                  Icons.fingerprint),
+              _kv('Account Manager', r['vendor_contact_name'],
                   Icons.person_outline),
+              _kvLookup(c, ref, 'Client', r['vendor_client_id'],
+                  Icons.business_outlined,
+                  names: _clientNames, route: '/clients'),
+            ]),
+            _section('Support', [
               if (phone.isNotEmpty)
                 KeyValueTile(
-                  label: 'Phone',
+                  label: 'Support Phone',
                   value: phone,
                   icon: Icons.phone_outlined,
                   onTap: () =>
                       launchUrl(Uri.parse('tel:${str(r['vendor_phone'])}')),
                 ),
+              _kv('Support Hours', r['vendor_hours'], Icons.event_outlined),
               if (email != null)
                 KeyValueTile(
-                  label: 'Email',
+                  label: 'Support Email',
                   value: email,
                   icon: Icons.mail_outline,
                   onTap: () => launchUrl(Uri.parse('mailto:$email')),
                 ),
               if (website != null)
                 KeyValueTile(
-                  label: 'Website',
+                  label: 'Support Website',
                   value: website,
                   icon: Icons.public,
                   onTap: () => _open(website),
                   trailing: const Icon(Icons.open_in_new, size: 18),
                 ),
-              _kv('Hours', r['vendor_hours'], Icons.access_time),
-            ]),
-            _section('Account', [
-              _kv('Vendor code', r['vendor_code'], Icons.qr_code_2),
-              _kv('Account number', r['vendor_account_number'],
-                  Icons.badge_outlined),
-              _kv('SLA', r['vendor_sla'], Icons.support_agent),
-              _kv('Client ID', r['vendor_client_id'],
-                  Icons.business_outlined),
+              _kv('SLA', r['vendor_sla'], Icons.handshake_outlined),
+              _kv('Pin / Code', r['vendor_code'], Icons.vpn_key_outlined),
             ]),
             if (str(r['vendor_notes']) != null)
               _LongTextSection(
                   title: 'Notes', value: str(r['vendor_notes'])!),
+            _VendorRelations(vendorId: toInt(r['vendor_id']) ?? 0),
             _section('Dates', [
               _kvDate('Created', r['vendor_created_at'],
                   Icons.add_circle_outline),
@@ -1177,6 +1361,121 @@ class VendorDetailScreen extends StatelessWidget {
           ];
         },
       );
+}
+
+/// Renders related-entity sections for a vendor. ITFlow's schema technically
+/// has `asset_vendor_id` and `credential_vendor_id`, but the web UI doesn't
+/// surface those as primary vendor attributes (they're marked WIP), so this
+/// only shows the relations the web UI actually treats as first-class:
+/// contacts and software (licenses).
+class _VendorRelations extends ConsumerWidget {
+  final int vendorId;
+  const _VendorRelations({required this.vendorId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final contactsAsync = ref.watch(contactsProvider);
+    final softwareAsync = ref.watch(_listProvider('software'));
+
+    final contacts = contactsAsync.value
+            ?.where((c) => c.vendorId == vendorId)
+            .toList() ??
+        const <Contact>[];
+    final software = softwareAsync.value
+            ?.where((r) => toInt(r['software_vendor_id']) == vendorId)
+            .toList() ??
+        const <Map<String, dynamic>>[];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _relatedContacts(context, contacts, contactsAsync.isLoading),
+        _relatedSoftware(context, software, softwareAsync.isLoading),
+      ],
+    );
+  }
+
+  Widget _relatedContacts(
+      BuildContext context, List<Contact> items, bool loading) {
+    if (!loading && items.isEmpty) return const SizedBox.shrink();
+    return _relatedCard(
+      title: 'Contacts',
+      count: items.length,
+      loading: loading && items.isEmpty,
+      child: Column(
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0) const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: Text(items[i].name ?? '(unnamed)'),
+              subtitle: Text([
+                items[i].title,
+                items[i].email,
+              ]
+                  .map((s) => s?.toString().trim() ?? '')
+                  .where((s) => s.isNotEmpty)
+                  .join(' • ')),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => context.push('/contacts/${items[i].id}'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _relatedSoftware(BuildContext context,
+      List<Map<String, dynamic>> items, bool loading) {
+    if (!loading && items.isEmpty) return const SizedBox.shrink();
+    return _relatedCard(
+      title: 'Software',
+      count: items.length,
+      loading: loading && items.isEmpty,
+      child: Column(
+        children: [
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0) const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.apps_outlined),
+              title: Text(str(items[i]['software_name']) ?? '(unnamed)'),
+              subtitle: Text([
+                str(items[i]['software_version']),
+                str(items[i]['software_type']),
+              ].whereType<String>().join(' • ')),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () =>
+                  context.push('/software/${toInt(items[i]['software_id']) ?? 0}'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _relatedCard({
+    required String title,
+    required int count,
+    required bool loading,
+    required Widget child,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader('$title${count > 0 ? ' ($count)' : ''}'),
+        if (loading)
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: LinearProgressIndicator(),
+          )
+        else
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            child: child,
+          ),
+      ],
+    );
+  }
 }
 
 // ===========================================================================
@@ -1346,9 +1645,28 @@ class InvoiceDetailScreen extends StatelessWidget {
         },
         subtitleFor: (r) => str(r['invoice_scope']),
         headerTrailing: (_, r) => _statusChip(str(r['invoice_status'])),
+        appBarActions: (c, r) {
+          final invoiceId = toInt(r['invoice_id']) ?? 0;
+          final status = (str(r['invoice_status']) ?? '').toLowerCase();
+          final canPay = status != 'paid' && status != 'cancelled' &&
+              status != 'draft';
+          return [
+            if (canPay)
+              IconButton(
+                tooltip: 'Make Payment',
+                icon: const Icon(Icons.payments_outlined),
+                onPressed: () => c.push('/invoices/$invoiceId/pay'),
+              ),
+            _InvoicePdfButton(invoiceId: invoiceId),
+          ];
+        },
         sectionsBuilder: (c, ref, r) {
           final cur = str(r['invoice_currency_code']);
+          final clientId = toInt(r['invoice_client_id']) ?? 0;
           return [
+            _InvoiceBillToSection(clientId: clientId),
+            _InvoiceItemsSection(
+                invoiceId: toInt(r['invoice_id']) ?? 0, currency: cur),
             _section('Amounts', [
               _kv('Total', _money(r['invoice_amount'], cur),
                   Icons.attach_money_outlined),
@@ -1358,6 +1676,15 @@ class InvoiceDetailScreen extends StatelessWidget {
                   Icons.account_balance_wallet_outlined),
               _kv('Currency', cur, Icons.money_outlined),
             ]),
+            if (str(r['invoice_note']) != null)
+              _LongTextSection(
+                  title: 'Note', value: str(r['invoice_note'])!),
+            _InvoiceTicketsSection(invoiceId: toInt(r['invoice_id']) ?? 0),
+            if (str(r['invoice_url_key']) != null)
+              _GuestInvoiceCard(
+                invoiceId: toInt(r['invoice_id']) ?? 0,
+                urlKey: str(r['invoice_url_key'])!,
+              ),
             _section('Dates', [
               _kvDate(
                   'Issued', r['invoice_date'], Icons.calendar_month_outlined),
@@ -1369,27 +1696,412 @@ class InvoiceDetailScreen extends StatelessWidget {
               _kvDate('Archived', r['invoice_archived_at'],
                   Icons.archive_outlined),
             ]),
-            _section('Associations', [
-              _kv('Client ID', r['invoice_client_id'],
-                  Icons.business_outlined),
-              _kv('Category ID', r['invoice_category_id'],
-                  Icons.label_outline),
-              _kv('Recurring invoice ID', r['invoice_recurring_invoice_id'],
-                  Icons.repeat),
-              if (str(r['invoice_url_key']) != null)
-                KeyValueTile(
-                  label: 'Public URL key',
-                  value: str(r['invoice_url_key'])!,
-                  icon: Icons.link,
-                  trailing: _CopyButton(value: str(r['invoice_url_key'])!),
-                ),
-            ]),
-            if (str(r['invoice_note']) != null)
-              _LongTextSection(
-                  title: 'Note', value: str(r['invoice_note'])!),
           ];
         },
       );
+}
+
+class _InvoiceBillToSection extends ConsumerWidget {
+  final int clientId;
+  const _InvoiceBillToSection({required this.clientId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (clientId == 0) return const SizedBox.shrink();
+    final clientAsync = ref.watch(clientProvider(clientId));
+    final locationsAsync = ref.watch(clientLocationsProvider(clientId));
+    final contactsAsync = ref.watch(contactsProvider);
+
+    final Client? client = clientAsync.value;
+    final primaryLocation = locationsAsync.value
+        ?.firstWhere((r) => toBool(r['location_primary']),
+            orElse: () => <String, dynamic>{});
+    final primaryContact = contactsAsync.value?.firstWhere(
+      (c) => c.clientId == clientId && c.primary,
+      orElse: () => Contact(id: 0),
+    );
+
+    if (client == null && primaryLocation == null && primaryContact == null) {
+      return const SizedBox.shrink();
+    }
+
+    final addressLines = primaryLocation == null
+        ? <String>[]
+        : <String>[
+            if (str(primaryLocation['location_address']) != null)
+              str(primaryLocation['location_address'])!,
+            [
+              str(primaryLocation['location_city']),
+              str(primaryLocation['location_state']),
+              str(primaryLocation['location_zip']),
+            ].whereType<String>().join(', '),
+            if (str(primaryLocation['location_country']) != null)
+              str(primaryLocation['location_country'])!,
+          ].where((s) => s.isNotEmpty).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('Bill To'),
+        Card(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (client?.name != null)
+                  InkWell(
+                    onTap: () => context.push('/clients/$clientId'),
+                    child: Text(
+                      client!.name!,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                if (addressLines.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(addressLines.join('\n'),
+                      style: Theme.of(context).textTheme.bodyMedium),
+                ],
+                if (primaryContact != null &&
+                    primaryContact.email != null) ...[
+                  const SizedBox(height: 6),
+                  InkWell(
+                    onTap: () => launchUrl(
+                        Uri.parse('mailto:${primaryContact.email}')),
+                    child: Text(
+                      primaryContact.email!,
+                      style: TextStyle(
+                          color: Theme.of(context).colorScheme.primary,
+                          decoration: TextDecoration.underline),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _InvoiceItemsSection extends ConsumerWidget {
+  final int invoiceId;
+  final String? currency;
+  const _InvoiceItemsSection(
+      {required this.invoiceId, required this.currency});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) =>
+      _ItemsSection(async: ref.watch(_invoiceItemsProvider(invoiceId)), currency: currency);
+}
+
+class _QuoteItemsSection extends ConsumerWidget {
+  final int quoteId;
+  final String? currency;
+  const _QuoteItemsSection(
+      {required this.quoteId, required this.currency});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) =>
+      _ItemsSection(async: ref.watch(_quoteItemsProvider(quoteId)), currency: currency);
+}
+
+class _ItemsSection extends StatelessWidget {
+  final AsyncValue<List<Map<String, dynamic>>> async;
+  final String? currency;
+  const _ItemsSection({required this.async, required this.currency});
+
+  @override
+  Widget build(BuildContext context) {
+    return async.when(
+      loading: () => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: const [
+          SectionHeader('Items'),
+          Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: LinearProgressIndicator(),
+          ),
+        ],
+      ),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (items) {
+        if (items.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SectionHeader('Items (${items.length})'),
+            Card(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                children: [
+                  for (var i = 0; i < items.length; i++) ...[
+                    if (i > 0) const Divider(height: 1),
+                    _InvoiceItemTile(item: items[i], currency: currency),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _InvoiceItemTile extends StatelessWidget {
+  final Map<String, dynamic> item;
+  final String? currency;
+  const _InvoiceItemTile({required this.item, required this.currency});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = str(item['item_name']) ?? '(item)';
+    final desc = str(item['item_description']);
+    final qty = toDouble(item['item_quantity']);
+    final price = toDouble(item['item_price']);
+    final total = toDouble(item['item_total']);
+    final tax = toDouble(item['item_tax']);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(name,
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+              ),
+              if (total != null)
+                Text(
+                  _money(total, currency),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+            ],
+          ),
+          if (desc != null && desc.trim().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(desc, style: Theme.of(context).textTheme.bodySmall),
+          ],
+          const SizedBox(height: 6),
+          DefaultTextStyle(
+            style: Theme.of(context).textTheme.bodySmall ?? const TextStyle(),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 2,
+              children: [
+                if (qty != null)
+                  Text('Qty ${_fmtQty(qty)}'),
+                if (price != null)
+                  Text('Unit ${_money(price, currency)}'),
+                if (tax != null && tax > 0)
+                  Text('Tax ${_money(tax, currency)}'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _fmtQty(double q) {
+  if (q == q.roundToDouble()) return q.toInt().toString();
+  return q.toStringAsFixed(2);
+}
+
+class _InvoiceTicketsSection extends ConsumerWidget {
+  final int invoiceId;
+  const _InvoiceTicketsSection({required this.invoiceId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(ticketsProvider);
+    if (async.isLoading && async.value == null) return const SizedBox.shrink();
+    final tickets = async.value
+            ?.where(
+                (t) => toInt(t.raw['ticket_invoice_id']) == invoiceId)
+            .toList() ??
+        const <Ticket>[];
+    if (tickets.isEmpty) return const SizedBox.shrink();
+    tickets.sort((a, b) {
+      final av = a.createdAt ?? DateTime(0);
+      final bv = b.createdAt ?? DateTime(0);
+      return bv.compareTo(av);
+    });
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SectionHeader('Tickets (${tickets.length})'),
+        Card(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            children: [
+              for (var i = 0; i < tickets.length; i++) ...[
+                if (i > 0) const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.support_agent),
+                  title: Text(tickets[i].subject ?? '(no subject)'),
+                  subtitle: Text([
+                    tickets[i].displayNumber,
+                    tickets[i].isResolved ? 'Closed' : 'Open',
+                    tickets[i].createdAt == null
+                        ? null
+                        : _df.format(tickets[i].createdAt!),
+                  ]
+                      .whereType<String>()
+                      .where((s) => s.isNotEmpty)
+                      .join(' • ')),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/tickets/${tickets[i].id}'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _GuestInvoiceCard extends ConsumerWidget {
+  final int invoiceId;
+  final String urlKey;
+  const _GuestInvoiceCard({required this.invoiceId, required this.urlKey});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final root = _instanceRoot(ref);
+    if (root == null) return const SizedBox.shrink();
+    final url =
+        '$root/guest/guest_view_invoice.php?invoice_id=$invoiceId&url_key=$urlKey';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('Guest View'),
+        Card(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.link,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Shareable link the client can open without logging in.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: url));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Guest link copied'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.copy, size: 18),
+                        label: const Text('Copy link'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.tonalIcon(
+                        onPressed: () => launchUrl(Uri.parse(url),
+                            mode: LaunchMode.externalApplication),
+                        icon: const Icon(Icons.open_in_new, size: 18),
+                        label: const Text('Open'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _InvoicePdfButton extends ConsumerStatefulWidget {
+  final int invoiceId;
+  const _InvoicePdfButton({required this.invoiceId});
+
+  @override
+  ConsumerState<_InvoicePdfButton> createState() => _InvoicePdfButtonState();
+}
+
+class _InvoicePdfButtonState extends ConsumerState<_InvoicePdfButton> {
+  bool _busy = false;
+
+  Future<void> _download() async {
+    final web = ref.read(itflowWebClientProvider);
+    if (web == null) {
+      _toast('Agent email + password not set. Add them in Settings.');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final bytes = await web.downloadInvoicePdf(widget.invoiceId);
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/invoice-${widget.invoiceId}.pdf');
+      await file.writeAsBytes(Uint8List.fromList(bytes), flush: true);
+      if (!mounted) return;
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'application/pdf')],
+        subject: 'Invoice #${widget.invoiceId}',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _toast('Download failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: 'Download PDF',
+      icon: _busy
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.picture_as_pdf_outlined),
+      onPressed: _busy ? null : _download,
+    );
+  }
 }
 
 // ===========================================================================
@@ -1461,9 +2173,16 @@ class QuoteDetailScreen extends StatelessWidget {
         },
         subtitleFor: (r) => str(r['quote_scope']),
         headerTrailing: (_, r) => _statusChip(str(r['quote_status'])),
+        appBarActions: (c, r) => [
+          _QuotePdfButton(quoteId: toInt(r['quote_id']) ?? 0),
+        ],
         sectionsBuilder: (c, ref, r) {
           final cur = str(r['quote_currency_code']);
+          final clientId = toInt(r['quote_client_id']) ?? 0;
+          final quoteId = toInt(r['quote_id']) ?? 0;
           return [
+            _InvoiceBillToSection(clientId: clientId),
+            _QuoteItemsSection(quoteId: quoteId, currency: cur),
             _section('Amounts', [
               _kv('Total', _money(r['quote_amount'], cur),
                   Icons.attach_money_outlined),
@@ -1471,6 +2190,13 @@ class QuoteDetailScreen extends StatelessWidget {
                   Icons.percent_outlined),
               _kv('Currency', cur, Icons.money_outlined),
             ]),
+            if (str(r['quote_note']) != null)
+              _LongTextSection(title: 'Note', value: str(r['quote_note'])!),
+            if (str(r['quote_url_key']) != null)
+              _GuestQuoteCard(
+                quoteId: quoteId,
+                urlKey: str(r['quote_url_key'])!,
+              ),
             _section('Dates', [
               _kvDate(
                   'Issued', r['quote_date'], Icons.calendar_month_outlined),
@@ -1483,21 +2209,144 @@ class QuoteDetailScreen extends StatelessWidget {
                   Icons.archive_outlined),
             ]),
             _section('Associations', [
-              _kv('Client ID', r['quote_client_id'], Icons.business_outlined),
+              _kvLookup(c, ref, 'Client', r['quote_client_id'],
+                  Icons.business_outlined,
+                  names: _clientNames, route: '/clients'),
               _kv('Category ID', r['quote_category_id'], Icons.label_outline),
-              if (str(r['quote_url_key']) != null)
-                KeyValueTile(
-                  label: 'Public URL key',
-                  value: str(r['quote_url_key'])!,
-                  icon: Icons.link,
-                  trailing: _CopyButton(value: str(r['quote_url_key'])!),
-                ),
             ]),
-            if (str(r['quote_note']) != null)
-              _LongTextSection(title: 'Note', value: str(r['quote_note'])!),
           ];
         },
       );
+}
+
+class _GuestQuoteCard extends ConsumerWidget {
+  final int quoteId;
+  final String urlKey;
+  const _GuestQuoteCard({required this.quoteId, required this.urlKey});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final root = _instanceRoot(ref);
+    if (root == null) return const SizedBox.shrink();
+    final url =
+        '$root/guest/guest_view_quote.php?quote_id=$quoteId&url_key=$urlKey';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SectionHeader('Guest View'),
+        Card(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.link,
+                        size: 18,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Shareable link the client can open without logging in.',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: url));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Guest link copied'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.copy, size: 18),
+                        label: const Text('Copy link'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: FilledButton.tonalIcon(
+                        onPressed: () => launchUrl(Uri.parse(url),
+                            mode: LaunchMode.externalApplication),
+                        icon: const Icon(Icons.open_in_new, size: 18),
+                        label: const Text('Open'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _QuotePdfButton extends ConsumerStatefulWidget {
+  final int quoteId;
+  const _QuotePdfButton({required this.quoteId});
+
+  @override
+  ConsumerState<_QuotePdfButton> createState() => _QuotePdfButtonState();
+}
+
+class _QuotePdfButtonState extends ConsumerState<_QuotePdfButton> {
+  bool _busy = false;
+
+  Future<void> _download() async {
+    final web = ref.read(itflowWebClientProvider);
+    if (web == null) {
+      _toast('Agent email + password not set. Add them in Settings.');
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final bytes = await web.downloadQuotePdf(widget.quoteId);
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/quote-${widget.quoteId}.pdf');
+      await file.writeAsBytes(Uint8List.fromList(bytes), flush: true);
+      if (!mounted) return;
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'application/pdf')],
+        subject: 'Quote #${widget.quoteId}',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      _toast('Download failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: 'Download PDF',
+      icon: _busy
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.picture_as_pdf_outlined),
+      onPressed: _busy ? null : _download,
+    );
+  }
 }
 
 // ===========================================================================
@@ -1577,6 +2426,10 @@ class ExpenseDetailScreen extends StatelessWidget {
         },
         sectionsBuilder: (c, ref, r) {
           final receipt = str(r['expense_receipt']);
+          final root = _instanceRoot(ref);
+          final receiptUrl = (receipt != null && root != null)
+              ? '$root/uploads/expenses/${Uri.encodeComponent(receipt)}'
+              : null;
           return [
             _section('Details', [
               _kv('Amount',
@@ -1592,18 +2445,29 @@ class ExpenseDetailScreen extends StatelessWidget {
                   label: 'Receipt',
                   value: receipt,
                   icon: Icons.receipt_outlined,
-                  onTap: () => _open(receipt),
+                  onTap: receiptUrl == null ? null : () => _open(receiptUrl),
                   trailing: const Icon(Icons.open_in_new, size: 18),
                 ),
             ]),
             _section('Associations', [
-              _kv('Vendor ID', r['expense_vendor_id'], Icons.store_outlined),
-              _kv('Client ID', r['expense_client_id'],
-                  Icons.business_outlined),
-              _kv('Category ID', r['expense_category_id'],
-                  Icons.label_outline),
-              _kv('Account ID', r['expense_account_id'],
-                  Icons.account_balance_outlined),
+              _kvLookup(c, ref, 'Vendor', r['expense_vendor_id'],
+                  Icons.store_outlined,
+                  names: _vendorNames, route: '/vendors'),
+              _kvLookup(c, ref, 'Client', r['expense_client_id'],
+                  Icons.business_outlined,
+                  names: _clientNames, route: '/clients'),
+              _kvFromMap(
+                  'Category',
+                  r['expense_category_id'],
+                  Icons.label_outline,
+                  ref.watch(_expenseAdminLookupsProvider).value?.categories ??
+                      const <int, String>{}),
+              _kvFromMap(
+                  'Account',
+                  r['expense_account_id'],
+                  Icons.account_balance_outlined,
+                  ref.watch(_expenseAdminLookupsProvider).value?.accounts ??
+                      const <int, String>{}),
             ]),
             _section('Dates', [
               _kvDate('Created', r['expense_created_at'],
@@ -1680,9 +2544,12 @@ class CertificateDetailScreen extends StatelessWidget {
                   Icons.verified_user_outlined),
               _kvDate('Expires', r['certificate_expire'],
                   Icons.event_outlined),
-              _kv('Domain ID', r['certificate_domain_id'], Icons.dns_outlined),
-              _kv('Client ID', r['certificate_client_id'],
-                  Icons.business_outlined),
+              _kvLookup(c, ref, 'Domain', r['certificate_domain_id'],
+                  Icons.dns_outlined,
+                  names: _domainNames, route: '/domains'),
+              _kvLookup(c, ref, 'Client', r['certificate_client_id'],
+                  Icons.business_outlined,
+                  names: _clientNames, route: '/clients'),
             ]),
             if (str(r['certificate_public_key']) != null)
               _LongTextSection(

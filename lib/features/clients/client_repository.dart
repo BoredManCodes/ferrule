@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/api/providers.dart';
+import '../../core/util.dart';
 import 'client_model.dart';
 
 class ClientRepository {
@@ -66,4 +67,31 @@ final clientProvider =
     FutureProvider.autoDispose.family<Client?, int>((ref, id) async {
   await ref.watch(credentialsProvider.future);
   return ref.read(clientRepositoryProvider).get(id);
+});
+
+/// All locations belonging to the given client. ITFlow's locations API doesn't
+/// accept a client filter (only API-key-bound filtering), so we page through
+/// every location and filter client-side. For typical instances the location
+/// table is small.
+final clientLocationsProvider = FutureProvider.autoDispose
+    .family<List<Map<String, dynamic>>, int>((ref, clientId) async {
+  await ref.watch(credentialsProvider.future);
+  final client = requireClient(ref);
+  const pageSize = 500;
+  const maxItems = 10000;
+  final out = <Map<String, dynamic>>[];
+  var offset = 0;
+  while (offset < maxItems) {
+    final resp = await client
+        .get('locations', 'read', query: {'limit': pageSize, 'offset': offset});
+    if (!resp.success) break;
+    final rows = resp.rows;
+    if (rows.isEmpty) break;
+    for (final r in rows) {
+      if (toInt(r['location_client_id']) == clientId) out.add(r);
+    }
+    if (rows.length < pageSize) break;
+    offset += pageSize;
+  }
+  return out;
 });
