@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.2 - 2026-05-16
+
+- Trent Buckley in the About dialog is now a tappable link to his site.
+- Fixed instance name not appearing in the home title bar after a fresh sign-in when only the API key (no agent web credentials) was entered. The company name now refreshes off the public login page so it loads without web creds.
+
 ## 1.1.1 - 2026-05-16
 
 - Trips screen now lists your past trips below the active trip card. Pulls the all-time list from the ITFlow web UI (no v1 API for trips). Pull-to-refresh and newly logged trips appear automatically.

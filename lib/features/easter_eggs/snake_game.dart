@@ -407,6 +407,5 @@ class _BoardPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _BoardPainter old) =>
-      old.snake != snake || old.food != food;
+  bool shouldRepaint(covariant _BoardPainter old) => true;
 }

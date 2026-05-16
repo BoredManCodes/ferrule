@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/api/itflow_web_client.dart';
 import 'core/api/providers.dart';
 import 'core/router.dart';
 import 'core/settings/app_settings.dart';
@@ -25,24 +26,32 @@ class _FerruleAppState extends ConsumerState<FerruleApp> {
     ref.listenManual<AsyncValue<Credentials?>>(credentialsProvider,
         (prev, next) {
       final c = next.value;
-      if (c != null && c.hasWebCreds && c != _lastSeenCreds) {
+      if (c != null && c != _lastSeenCreds) {
         _lastSeenCreds = c;
-        _maybeRefreshAccent();
+        _maybeRefreshBranding();
       } else if (c == null) {
         _lastSeenCreds = null;
       }
     });
   }
 
-  Future<void> _maybeRefreshAccent() async {
+  Future<void> _maybeRefreshBranding() async {
     final settings = ref.read(appSettingsProvider).value;
     if (settings == null) return;
-    final web = ref.read(itflowWebClientProvider);
-    if (web == null) return;
+    final creds = ref.read(credentialsProvider).value;
+    if (creds == null) return;
+    // Use the configured web client if web creds are set; otherwise build a
+    // throwaway one with empty creds so we can still scrape the public
+    // login.php (company name lives there and the agent-page lookup that
+    // needs auth will just fail silently inside fetchInstanceBranding).
+    final web = ref.read(itflowWebClientProvider) ??
+        ItflowWebClient(
+          baseUrl: creds.instanceUrl,
+          email: '',
+          password: '',
+        );
     try {
       final b = await web.fetchInstanceBranding();
-      // Accent is auto-applied only if the user has chosen "auto" — but we
-      // cache it regardless so toggling auto later works without re-fetch.
       if (b.accent != null && settings.accentMode == 'auto') {
         await ref
             .read(appSettingsProvider.notifier)
