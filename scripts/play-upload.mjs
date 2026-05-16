@@ -6,7 +6,7 @@
 //   - PLAY_SERVICE_ACCOUNT_JSON (path to service-account key JSON)     -- "Plan A"
 //
 // Usage:
-//   node play-upload.mjs --aab <path> [--track internal] [--package au.com.bordertechsolutions.ferrule]
+//   node play-upload.mjs --aab <path> [--track alpha] [--package au.com.bordertechsolutions.ferrule]
 //                        [--notes <file>] [--notes-text "..."] [--language en-AU]
 //                        [--name <release name>] [--status completed]
 //                        [--service-account <path>] [--oauth-client <path>]
@@ -195,7 +195,7 @@ const aabPath = resolve(
   args.aab ||
     join(__dirname, '..', 'build', 'app', 'outputs', 'bundle', 'release', 'app-release.aab'),
 );
-const track = String(args.track || 'internal');
+const track = String(args.track || 'alpha');
 const packageName = String(args.package || 'au.com.bordertechsolutions.ferrule');
 const releaseStatus = String(args.status || 'completed');
 const language = String(args.language || 'en-AU');

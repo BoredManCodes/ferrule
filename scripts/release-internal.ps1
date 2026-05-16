@@ -1,11 +1,14 @@
 #!/usr/bin/env pwsh
-# Build the Ferrule Flutter app bundle and upload to Play Console internal testing.
+# Build the Ferrule Flutter app bundle and upload to Play Console closed testing.
+#
+# Defaults to the `alpha` (Closed Testing) track. Pass -Track internal to fall
+# back to Internal Testing.
 #
 # Examples:
-#   .\release-internal.ps1                       # build + upload draft + browser-promote
+#   .\release-internal.ps1                       # build + upload draft + browser-promote (closed testing)
 #   .\release-internal.ps1 -SkipBuild            # re-use the last AAB
 #   .\release-internal.ps1 -Notes "Hotfix: ..."  # override notes inline
-#   .\release-internal.ps1 -Track alpha          # different track
+#   .\release-internal.ps1 -Track internal       # publish to Internal Testing instead
 #   .\release-internal.ps1 -NoPromote            # leave release as draft on Play Console
 #   .\release-internal.ps1 -DryRun               # build only, no upload, no promote
 #
@@ -17,7 +20,7 @@
 [CmdletBinding()]
 param(
   [ValidateSet('internal', 'alpha', 'beta', 'production')]
-  [string]$Track = 'internal',
+  [string]$Track = 'alpha',
   [string]$Notes,
   [string]$NotesFile,
   [ValidateSet('completed', 'draft', 'inProgress', 'halted')]
@@ -154,9 +157,19 @@ try {
 if (-not $NoPromote -and $Status -eq 'draft') {
   Push-Location $ScriptDir
   try {
-    Write-Host "[release-internal] promoting draft via browser..."
-    & node promote-via-browser.mjs --release-name $VersionName --version-code $VersionCode
-    if ($LASTEXITCODE -ne 0) { throw "promote-via-browser.mjs failed (exit $LASTEXITCODE)" }
+    if ($Track -eq 'alpha') {
+      # Closed Testing track id (numeric URL slug for au.com.bordertechsolutions.ferrule).
+      $ClosedTrackId = '4698797810447037521'
+      Write-Host "[release-internal] promoting closed-testing draft via browser..."
+      & node promote-closed-testing.mjs --track $ClosedTrackId --release-name $VersionName --version-code $VersionCode
+      if ($LASTEXITCODE -ne 0) { throw "promote-closed-testing.mjs failed (exit $LASTEXITCODE)" }
+    } elseif ($Track -eq 'internal') {
+      Write-Host "[release-internal] promoting internal draft via browser..."
+      & node promote-via-browser.mjs --release-name $VersionName --version-code $VersionCode
+      if ($LASTEXITCODE -ne 0) { throw "promote-via-browser.mjs failed (exit $LASTEXITCODE)" }
+    } else {
+      Write-Warning "[release-internal] no auto-promote flow for track '$Track'; leaving draft for manual review."
+    }
   } finally {
     Pop-Location
   }
