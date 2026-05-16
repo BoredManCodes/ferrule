@@ -97,8 +97,8 @@ API additions live in [BoredManCodes/itflow](https://github.com/BoredManCodes/it
 | Endpoint | Purpose |
 |---|---|
 | `GET /api/v1/quote_items/read.php` | Line items for a quote, JOINed to `quotes` for client scope |
-| `GET /api/v1/ticket_replies/read.php` | Conversation replies for a ticket |
-| `POST /api/v1/ticket_replies/create.php` | Post a new reply to a ticket |
+| `GET /api/v1/tickets/replies/read.php` | Conversation replies for a ticket |
+| `POST /api/v1/tickets/replies/create.php` | Post a new reply to a ticket (Internal or Public-no-email; status updates supported) |
 
 All additions follow the existing `validate_api_key.php` + `LIKE '$client_id'` scoping pattern and are designed to be upstreamable.
 

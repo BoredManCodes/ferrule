@@ -457,6 +457,7 @@ class _Actions extends ConsumerWidget {
                 ticketLabel:
                     '${ticket.displayNumber} — ${ticket.subject ?? ''}',
                 duration: Duration.zero,
+                replyOnly: true,
               ),
             );
             ref.invalidate(ticketRepliesProvider(ticket.id));

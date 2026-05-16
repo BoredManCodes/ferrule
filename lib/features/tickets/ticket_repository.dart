@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/api/api_response.dart';
 import '../../core/api/providers.dart';
 import '../../core/util.dart';
 import 'reply_model.dart';
@@ -80,6 +81,44 @@ class TicketRepository {
       'ticket_id': ticketId,
     });
     return resp.success;
+  }
+
+  /// Posts a reply via the REST API. Works without agent web credentials but
+  /// only supports Internal (3) and Public no-email (1). For Public + email
+  /// (2) the caller must fall back to the web client path on
+  /// [ItflowWebClient.addTicketReply].
+  ///
+  /// Returns ok=true on success. status defaults to 0 which means "no status
+  /// change"; pass 1-4 to update.
+  Future<({bool ok, String? error})> addReply({
+    required int ticketId,
+    required String body,
+    int replyType = 3,
+    int status = 0,
+    Duration timeWorked = Duration.zero,
+  }) async {
+    if (replyType == 2) {
+      return (
+        ok: false,
+        error: 'Public + email replies need agent credentials in Settings.'
+      );
+    }
+    final client = requireClient(ref);
+    try {
+      final resp = await client.post('tickets/replies', 'create', body: {
+        'ticket_id': ticketId,
+        'ticket_reply': body,
+        'public_reply_type': replyType,
+        if (status > 0) 'status': status,
+        'hours': timeWorked.inHours,
+        'minutes': timeWorked.inMinutes % 60,
+        'seconds': timeWorked.inSeconds % 60,
+      });
+      if (!resp.success) return (ok: false, error: resp.message ?? 'Failed');
+      return (ok: true, error: null);
+    } on ApiException catch (e) {
+      return (ok: false, error: e.message);
+    }
   }
 
   /// Edits subject/details/priority on an existing ticket (web UI route — the
