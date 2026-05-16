@@ -8,6 +8,7 @@ import '../../core/auth/app_lock.dart';
 import '../../core/sentry/sentry_config.dart';
 import '../../core/settings/app_settings.dart';
 import '../../core/settings/crash_consent.dart';
+import '../easter_eggs/snake_game.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -289,21 +290,31 @@ class _AboutDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return AlertDialog(
-      title: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: scheme.primaryContainer,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(Icons.shield_outlined,
-                color: scheme.onPrimaryContainer, size: 22),
+      title: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () {
+          Navigator.of(context).pop();
+          openFerruleSnake(context);
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.shield_outlined,
+                    color: scheme.onPrimaryContainer, size: 22),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(child: Text('Ferrule — Client for ITFlow')),
+            ],
           ),
-          const SizedBox(width: 12),
-          const Expanded(child: Text('Ferrule — Client for ITFlow')),
-        ],
+        ),
       ),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -311,29 +322,35 @@ class _AboutDialog extends StatelessWidget {
         children: [
           const Text('Mobile companion for your ITFlow instance.'),
           const SizedBox(height: 12),
-          Text.rich(
-            TextSpan(
-              children: [
-                TextSpan(
-                  text: 'ferrule',
-                  style: TextStyle(
-                    fontStyle: FontStyle.italic,
-                    fontWeight: FontWeight.w600,
-                    color: scheme.onSurface,
-                  ),
-                ),
-                TextSpan(
-                  text:
-                      ' /ˈfɛrəl/ — the small metal band that binds a tool together. '
-                      'This client does the same for your ITFlow workflow.',
-                  style: TextStyle(
-                    fontStyle: FontStyle.italic,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
+          GestureDetector(
+            onLongPress: () => launchUrl(
+              Uri.parse('https://en.wikipedia.org/wiki/Ferrule'),
+              mode: LaunchMode.externalApplication,
             ),
-            style: Theme.of(context).textTheme.bodySmall,
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: 'ferrule',
+                    style: TextStyle(
+                      fontStyle: FontStyle.italic,
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                  TextSpan(
+                    text:
+                        ' /ˈfɛrəl/ — the small metal band that binds a tool together. '
+                        'This client does the same for your ITFlow workflow.',
+                    style: TextStyle(
+                      fontStyle: FontStyle.italic,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ),
           const SizedBox(height: 16),
           Text(
@@ -345,7 +362,29 @@ class _AboutDialog extends StatelessWidget {
                 ),
           ),
           const SizedBox(height: 4),
-          const Text('Trent Buckley'),
+          InkWell(
+            onTap: () => launchUrl(
+              Uri.parse('https://trent-buckley.com'),
+              mode: LaunchMode.externalApplication,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Trent Buckley',
+                    style: TextStyle(
+                      color: scheme.primary,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.open_in_new, size: 14, color: scheme.primary),
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 12),
           Text(
             'A PROJECT BY',

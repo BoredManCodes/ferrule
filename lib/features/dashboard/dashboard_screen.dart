@@ -8,6 +8,8 @@ import '../../core/settings/app_settings.dart';
 import '../assets/asset_repository.dart';
 import '../clients/client_repository.dart';
 import '../credentials/credential_repository.dart';
+import '../easter_eggs/gday_overlay.dart';
+import '../easter_eggs/rapid_tap.dart';
 import '../tickets/ticket_repository.dart';
 import '../trips/active_trip.dart';
 import '../trips/trip_actions.dart';
@@ -25,7 +27,11 @@ class DashboardScreen extends ConsumerWidget {
     final settings = ref.watch(appSettingsProvider).value;
     return Scaffold(
       appBar: AppBar(
-        title: Text(settings?.effectiveTitle ?? 'ITFlow'),
+        title: RapidTap(
+          count: 5,
+          onTrigger: () => showGdayOverlay(context),
+          child: Text(settings?.effectiveTitle ?? 'ITFlow'),
+        ),
         actions: [
           const _TripQuickAction(),
           IconButton(
