@@ -225,6 +225,20 @@ class SettingsScreen extends ConsumerWidget {
             onTap: () => context.push('/privacy'),
           ),
           const Divider(),
+          const _SectionHeader('Support'),
+          ListTile(
+            leading: const Icon(Icons.support_agent_outlined),
+            title: const Text('Get help'),
+            subtitle:
+                const Text('Different problems need different inboxes'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => showDialog<void>(
+              context: context,
+              useRootNavigator: true,
+              builder: (_) => const _SupportDialog(),
+            ),
+          ),
+          const Divider(),
           ListTile(
             leading: Icon(Icons.logout,
                 color: Theme.of(context).colorScheme.error),
@@ -763,6 +777,218 @@ class _SecretDialogState extends State<_SecretDialog> {
           child: const Text('Save'),
         ),
       ],
+    );
+  }
+}
+
+class _SupportDialog extends StatelessWidget {
+  const _SupportDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AlertDialog(
+      title: Row(
+        children: [
+          Icon(Icons.support_agent_outlined, color: scheme.primary),
+          const SizedBox(width: 12),
+          const Expanded(child: Text('Where to get help')),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Ferrule talks to your ITFlow instance over the network. '
+              'That means problems generally fall into one of two camps, '
+              'and they go to different places.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            _SupportCard(
+              icon: Icons.phone_iphone_outlined,
+              accent: scheme.primary,
+              title: 'A problem with the app',
+              ours: true,
+              examples: const [
+                'A button does nothing or shows a Flutter error.',
+                'A screen looks broken or a list never loads.',
+                'The app crashed.',
+                'A feature is missing or behaves unexpectedly.',
+                'Layout looks wrong on your phone.',
+              ],
+              actionLabel: 'Email Border Tech Solutions',
+              actionIcon: Icons.mail_outline,
+              onAction: () => launchUrl(Uri.parse(
+                  'mailto:support@bordertechsolutions.com.au?subject=Ferrule%20app%20issue')),
+              tail:
+                  'Include what you tapped, what you expected, and what '
+                  'happened. A screenshot helps. Mention your ITFlow version '
+                  'if you know it.',
+            ),
+            const SizedBox(height: 12),
+            _SupportCard(
+              icon: Icons.dns_outlined,
+              accent: scheme.tertiary,
+              title: 'A problem with ITFlow itself',
+              ours: false,
+              examples: const [
+                'You can\'t sign into the ITFlow website either.',
+                'Data is missing or wrong on the server.',
+                'The server is slow, returning 500 errors, or down.',
+                'An ITFlow feature behaves the same in the web UI as in the app.',
+                'You need help with ITFlow configuration, permissions, or '
+                    'plugins.',
+              ],
+              actionLabel: 'Open ITFlow on GitHub',
+              actionIcon: Icons.open_in_new,
+              onAction: () => launchUrl(
+                  Uri.parse('https://github.com/itflow-org/itflow'),
+                  mode: LaunchMode.externalApplication),
+              tail:
+                  'ITFlow is an independent open-source project. Their '
+                  'community and maintainers are best placed to help with '
+                  'server-side issues; Border Tech Solutions doesn\'t '
+                  'maintain ITFlow itself.',
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.help_outline,
+                      size: 18, color: scheme.onSurfaceVariant),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Not sure which? A quick test: open your ITFlow '
+                      'instance in a browser and try the same thing. If it '
+                      'fails there too, it\'s an ITFlow issue. If it only '
+                      'fails in the app, it\'s ours.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            height: 1.4,
+                          ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Close'),
+        ),
+      ],
+    );
+  }
+}
+
+class _SupportCard extends StatelessWidget {
+  final IconData icon;
+  final Color accent;
+  final String title;
+  final bool ours;
+  final List<String> examples;
+  final String actionLabel;
+  final IconData actionIcon;
+  final VoidCallback onAction;
+  final String tail;
+
+  const _SupportCard({
+    required this.icon,
+    required this.accent,
+    required this.title,
+    required this.ours,
+    required this.examples,
+    required this.actionLabel,
+    required this.actionIcon,
+    required this.onAction,
+    required this.tail,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: accent.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: accent, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  ours ? 'Our area' : 'ITFlow\'s area',
+                  style: Theme.of(context)
+                      .textTheme
+                      .labelSmall
+                      ?.copyWith(color: accent, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final e in examples)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                '• $e',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      height: 1.4,
+                    ),
+              ),
+            ),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.tonalIcon(
+              onPressed: onAction,
+              icon: Icon(actionIcon, size: 16),
+              label: Text(actionLabel),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            tail,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  height: 1.4,
+                ),
+          ),
+        ],
+      ),
     );
   }
 }

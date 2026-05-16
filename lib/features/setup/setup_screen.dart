@@ -184,15 +184,41 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                             setState(() => _vaultExpanded = !_vaultExpanded),
                         children: [
                           Text(
-                            'When you created your API key in ITFlow, you set an additional '
-                            '"decrypt password" — that\'s the password that encrypts the '
-                            'credential entries (logins, MFA secrets) on the server. The app '
-                            'needs it to read and write those entries; without it, the Vault '
-                            'tab stays locked but everything else still works.',
+                            'When ITFlow generated your API key, it also showed you a separate '
+                            '"decrypt password" right next to it. That password is what encrypts '
+                            'the credential entries (logins, MFA secrets) on the server, so the '
+                            'app needs it to read and write Vault items. Without it the Vault tab '
+                            'stays locked but everything else still works.',
                             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                   color: scheme.onSurfaceVariant,
                                   height: 1.4,
                                 ),
+                          ),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: scheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.info_outline,
+                                    size: 16, color: scheme.tertiary),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'ITFlow only shows this password once, on the page where you '
+                                    'created the key. If you missed it, generate a new API key '
+                                    'and copy both fields before closing the page.',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(height: 1.3),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                           const SizedBox(height: 12),
                           TextFormField(
@@ -306,6 +332,47 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                                   _error!,
                                   style: TextStyle(color: scheme.onErrorContainer),
                                 ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: scheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: scheme.outlineVariant),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.lightbulb_outline,
+                                      size: 18, color: scheme.tertiary),
+                                  const SizedBox(width: 8),
+                                  Text('A few things worth checking',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.w600)),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '• You clicked Save Changes in ITFlow after creating the API key. '
+                                'New keys aren\'t active until that form is saved.\n'
+                                '• The instance URL is right (https://itflow.example.com, no '
+                                '/api or /agent path).\n'
+                                '• The API key string was pasted with no leading/trailing space.\n'
+                                '• Your device can reach the instance (try opening the URL in a '
+                                'browser).',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(height: 1.4),
                               ),
                             ],
                           ),
