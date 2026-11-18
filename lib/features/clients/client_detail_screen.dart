@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/util.dart';
 import '../../core/widgets.dart';
+import '../assets/asset_repository.dart';
 import '../contacts/contact_model.dart';
 import '../contacts/contact_repository.dart';
 import '../tickets/ticket_repository.dart';
@@ -155,6 +156,11 @@ class _ClientBody extends ConsumerWidget {
     final tickets = ticketsAsync.value
         ?.where((t) => t.clientId == client.id)
         .toList();
+    final clientAssets = ref
+        .watch(assetsProvider)
+        .value
+        ?.where((a) => a.clientId == client.id)
+        .toList();
     final openTickets = tickets?.where((t) => !t.isResolved).length;
     final closedTickets = tickets?.where((t) => t.isResolved).length;
 
@@ -164,6 +170,7 @@ class _ClientBody extends ConsumerWidget {
         ref.invalidate(clientLocationsProvider(client.id));
         ref.invalidate(contactsProvider);
         ref.invalidate(ticketsProvider);
+        ref.invalidate(assetsProvider);
         ref.invalidate(clientBannersProvider(client.id));
       },
       child: ListView(
@@ -188,6 +195,42 @@ class _ClientBody extends ConsumerWidget {
             closed: closedTickets,
             loading: ticketsAsync.isLoading,
           ),
+          const SectionHeader('Records'),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.devices_other_outlined),
+                  title: const Text('Assets'),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (clientAssets != null) Text('${clientAssets.length}'),
+                      const Icon(Icons.chevron_right),
+                    ],
+                  ),
+                  onTap: () => context.push('/assets?client=${client.id}'),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.vpn_key_outlined),
+                  title: const Text('Credentials'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      context.push('/credentials?client=${client.id}'),
+                ),
+              ],
+            ),
+          ),
+          if ((locationsAsync.value?.length ?? 0) > 1) ...[
+            const SectionHeader('Locations'),
+            for (final r in locationsAsync.value!)
+              if (r != primaryLocation) ...[
+                _LocationCard(row: r, showName: true),
+                const SizedBox(height: 8),
+              ],
+          ],
           if (contacts.length > 1 ||
               (contacts.isNotEmpty && primaryContact == null)) ...[
             const SectionHeader('Contacts'),
@@ -268,14 +311,21 @@ class _Header extends StatelessWidget {
 
 class _LocationCard extends StatelessWidget {
   final Map<String, dynamic> row;
-  const _LocationCard({required this.row});
+  final bool showName;
+  const _LocationCard({required this.row, this.showName = false});
 
   @override
   Widget build(BuildContext context) {
     final address = _composeAddress(row);
     final phone = _composePhone(row['location_phone_country_code'],
         row['location_phone'], row['location_phone_extension']);
+    final name = str(row['location_name']);
     final children = <Widget>[
+      if (showName && name != null && name.isNotEmpty)
+        ListTile(
+          leading: const Icon(Icons.business_outlined),
+          title: Text(name),
+        ),
       if (address != null)
         KeyValueTile(
           label: 'Address',

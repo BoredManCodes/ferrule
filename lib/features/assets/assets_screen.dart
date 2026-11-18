@@ -3,11 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/widgets.dart';
+import '../clients/client_repository.dart';
 import 'asset_model.dart';
 import 'asset_repository.dart';
 
 class AssetsScreen extends ConsumerStatefulWidget {
-  const AssetsScreen({super.key});
+  /// Only this client's assets when set.
+  final int? clientId;
+  const AssetsScreen({super.key, this.clientId});
 
   @override
   ConsumerState<AssetsScreen> createState() => _AssetsScreenState();
@@ -20,9 +23,12 @@ class _AssetsScreenState extends ConsumerState<AssetsScreen> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(assetsProvider);
+    final cid = widget.clientId;
+    final clientName =
+        cid == null ? null : ref.watch(clientProvider(cid)).value?.name;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Assets'),
+        title: Text(cid == null ? 'Assets' : 'Assets: ${clientName ?? 'client'}'),
         actions: [
           IconButton(
             tooltip: 'Scan QR',
@@ -49,7 +55,8 @@ class _AssetsScreenState extends ConsumerState<AssetsScreen> {
           const SizedBox(height: 12),
           FloatingActionButton.extended(
             heroTag: 'new',
-            onPressed: () => context.push('/assets/new'),
+            onPressed: () => context.push(
+                cid == null ? '/assets/new' : '/assets/new?client=$cid'),
             icon: const Icon(Icons.add),
             label: const Text('New Asset'),
           ),
@@ -115,6 +122,7 @@ class _AssetsScreenState extends ConsumerState<AssetsScreen> {
               ),
               data: (assets) {
                 final filtered = assets.where((a) {
+                  if (cid != null && a.clientId != cid) return false;
                   if (_typeFilter != null && a.type != _typeFilter) return false;
                   if (_search.isEmpty) return true;
                   final hay =

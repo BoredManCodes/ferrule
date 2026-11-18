@@ -7,7 +7,9 @@ import 'credential_repository.dart';
 
 class CredentialFormScreen extends ConsumerStatefulWidget {
   final int? credentialId;
-  const CredentialFormScreen({super.key, this.credentialId});
+  /// Preselects the client on a new credential.
+  final int? initialClientId;
+  const CredentialFormScreen({super.key, this.credentialId, this.initialClientId});
 
   @override
   ConsumerState<CredentialFormScreen> createState() =>
@@ -38,6 +40,7 @@ class _CredentialFormScreenState extends ConsumerState<CredentialFormScreen> {
     if (_isEdit) {
       _hydrate();
     } else {
+      _clientId = widget.initialClientId;
       _loaded = true;
     }
   }

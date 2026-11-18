@@ -135,10 +135,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/assets',
-            builder: (_, __) => const AssetsScreen(),
+            builder: (_, s) => AssetsScreen(clientId: _clientParam(s)),
             routes: [
               GoRoute(
-                  path: 'new', builder: (_, __) => const AssetFormScreen()),
+                  path: 'new',
+                  builder: (_, s) =>
+                      AssetFormScreen(initialClientId: _clientParam(s))),
               GoRoute(
                   path: 'scan',
                   builder: (_, __) => const AssetScanScreen()),
@@ -157,11 +159,12 @@ final routerProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/credentials',
-            builder: (_, __) => const CredentialsScreen(),
+            builder: (_, s) => CredentialsScreen(clientId: _clientParam(s)),
             routes: [
               GoRoute(
                 path: 'new',
-                builder: (_, __) => const CredentialFormScreen(),
+                builder: (_, s) =>
+                    CredentialFormScreen(initialClientId: _clientParam(s)),
               ),
               GoRoute(
                 path: ':id',
@@ -403,3 +406,7 @@ class _AuthListenable extends ChangeNotifier {
     ref.listen(uiPrefsProvider, (_, __) => notifyListeners());
   }
 }
+
+/// `?client=ID` narrows a list, or a new record, to one client.
+int? _clientParam(GoRouterState s) =>
+    int.tryParse(s.uri.queryParameters['client'] ?? '');

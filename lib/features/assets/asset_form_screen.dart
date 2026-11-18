@@ -8,7 +8,9 @@ import 'asset_repository.dart';
 
 class AssetFormScreen extends ConsumerStatefulWidget {
   final int? assetId;
-  const AssetFormScreen({super.key, this.assetId});
+  /// Preselects the client on a new asset.
+  final int? initialClientId;
+  const AssetFormScreen({super.key, this.assetId, this.initialClientId});
 
   @override
   ConsumerState<AssetFormScreen> createState() => _AssetFormScreenState();
@@ -40,6 +42,7 @@ class _AssetFormScreenState extends ConsumerState<AssetFormScreen> {
     if (_isEdit) {
       _hydrate();
     } else {
+      _clientId = widget.initialClientId;
       _loaded = true;
     }
   }

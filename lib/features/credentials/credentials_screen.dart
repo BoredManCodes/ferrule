@@ -4,10 +4,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/api/providers.dart';
 import '../../core/widgets.dart';
+import '../clients/client_repository.dart';
 import 'credential_repository.dart';
 
 class CredentialsScreen extends ConsumerStatefulWidget {
-  const CredentialsScreen({super.key});
+  /// Only this client's credentials when set.
+  final int? clientId;
+  const CredentialsScreen({super.key, this.clientId});
 
   @override
   ConsumerState<CredentialsScreen> createState() => _CredentialsScreenState();
@@ -22,10 +25,13 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
     final creds = ref.watch(credentialsProvider).value;
     final decryptSet = (creds?.decryptPassword ?? '').isNotEmpty;
     final async = ref.watch(credentialsListProvider);
+    final cid = widget.clientId;
+    final clientName =
+        cid == null ? null : ref.watch(clientProvider(cid)).value?.name;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Vault'),
+        title: Text(cid == null ? 'Vault' : 'Vault: ${clientName ?? 'client'}'),
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -36,7 +42,9 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
       ),
       floatingActionButton: decryptSet
           ? FloatingActionButton.extended(
-              onPressed: () => context.push('/credentials/new'),
+              onPressed: () => context.push(cid == null
+                  ? '/credentials/new'
+                  : '/credentials/new?client=$cid'),
               icon: const Icon(Icons.add),
               label: const Text('New'),
             )
@@ -92,6 +100,7 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                     ),
                     data: (s) {
                       final filtered = s.items.where((c) {
+                        if (cid != null && c.clientId != cid) return false;
                         if (_favoritesOnly && !c.favorite) return false;
                         if (_search.isEmpty) return true;
                         final hay =
@@ -129,7 +138,9 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                                 const Divider(height: 1),
                             itemBuilder: (_, i) {
                               if (i == filtered.length) {
-                                return _LoadMoreFooter(state: s);
+                                return _LoadMoreFooter(
+                                    state: s,
+                                    shown: cid == null ? null : filtered.length);
                               }
                               final c = filtered[i];
                               return ListTile(
@@ -171,18 +182,21 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
 
 class _LoadMoreFooter extends ConsumerWidget {
   final CredentialsListState state;
-  const _LoadMoreFooter({required this.state});
+  /// Count to show instead of everything loaded, for a filtered list.
+  final int? shown;
+  const _LoadMoreFooter({required this.state, this.shown});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
     if (state.allLoaded) {
-      if (state.items.isEmpty) return const SizedBox.shrink();
+      final n = shown ?? state.items.length;
+      if (n == 0) return const SizedBox.shrink();
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 16),
         child: Center(
           child: Text(
-            '${state.items.length} credentials',
+            '$n credentials',
             style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
           ),
         ),
