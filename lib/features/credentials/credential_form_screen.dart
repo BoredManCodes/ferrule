@@ -112,6 +112,7 @@ class _CredentialFormScreenState extends ConsumerState<CredentialFormScreen> {
       if (!mounted) return;
       if (ok) {
         ref.invalidate(credentialsListProvider);
+        ref.invalidate(clientCredentialsListProvider);
         if (_isEdit) {
           ref.invalidate(credentialProvider(widget.credentialId!));
         }

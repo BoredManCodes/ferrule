@@ -226,6 +226,7 @@ class AssetDetailScreen extends ConsumerWidget {
     if (!context.mounted) return;
     if (r.ok) {
       ref.invalidate(assetsProvider);
+      ref.invalidate(clientAssetsProvider);
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Asset deleted')));
       context.pop();

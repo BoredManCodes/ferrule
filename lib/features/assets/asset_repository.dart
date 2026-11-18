@@ -12,6 +12,7 @@ class AssetRepository {
   Future<List<Asset>> list({
     int pageSize = 500,
     int maxItems = 50000,
+    int? clientId,
     void Function(int loaded)? onProgress,
   }) async {
     final client = requireClient(ref);
@@ -21,6 +22,7 @@ class AssetRepository {
       final resp = await client.get('assets', 'read', query: {
         'limit': pageSize,
         'offset': offset,
+        'client_id': ?clientId,
       });
       if (!resp.success) break;
       final rows = resp.rows;
@@ -128,6 +130,15 @@ final assetsProvider =
         onProgress: (n) =>
             ref.read(assetLoadProgressProvider.notifier).set(n),
       );
+});
+
+/// One client's assets. ITFlow 26.09+ filters by client_id on the server;
+/// older installs ignore it and send everything, so filter here too.
+final clientAssetsProvider =
+    FutureProvider.autoDispose.family<List<Asset>, int>((ref, cid) async {
+  await ref.watch(credentialsProvider.future);
+  final rows = await ref.read(assetRepositoryProvider).list(clientId: cid);
+  return rows.where((a) => a.clientId == cid).toList();
 });
 
 final assetProvider =

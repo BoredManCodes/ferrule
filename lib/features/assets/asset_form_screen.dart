@@ -121,6 +121,7 @@ class _AssetFormScreenState extends ConsumerState<AssetFormScreen> {
       if (!mounted) return;
       if (ok) {
         ref.invalidate(assetsProvider);
+        ref.invalidate(clientAssetsProvider);
         if (_isEdit) ref.invalidate(assetProvider(widget.assetId!));
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(_isEdit ? 'Asset updated' : 'Asset created')),

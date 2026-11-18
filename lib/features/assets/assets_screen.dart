@@ -20,10 +20,16 @@ class _AssetsScreenState extends ConsumerState<AssetsScreen> {
   String _search = '';
   String? _typeFilter;
 
+  void _reload() {
+    ref.invalidate(assetsProvider);
+    ref.invalidate(clientAssetsProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final async = ref.watch(assetsProvider);
     final cid = widget.clientId;
+    final async =
+        ref.watch(cid == null ? assetsProvider : clientAssetsProvider(cid));
     final clientName =
         cid == null ? null : ref.watch(clientProvider(cid)).value?.name;
     return Scaffold(
@@ -37,7 +43,7 @@ class _AssetsScreenState extends ConsumerState<AssetsScreen> {
           ),
           IconButton(
             tooltip: 'Refresh',
-            onPressed: () => ref.invalidate(assetsProvider),
+            onPressed: () => _reload(),
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -118,7 +124,7 @@ class _AssetsScreenState extends ConsumerState<AssetsScreen> {
               },
               error: (e, _) => ErrorView(
                 error: e,
-                onRetry: () => ref.invalidate(assetsProvider),
+                onRetry: () => _reload(),
               ),
               data: (assets) {
                 final filtered = assets.where((a) {
@@ -138,7 +144,7 @@ class _AssetsScreenState extends ConsumerState<AssetsScreen> {
                   );
                 }
                 return RefreshIndicator(
-                  onRefresh: () async => ref.invalidate(assetsProvider),
+                  onRefresh: () async => _reload(),
                   child: ListView.separated(
                     itemCount: filtered.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),

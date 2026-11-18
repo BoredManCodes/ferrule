@@ -7,13 +7,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+final _rows = [
+  Asset(id: 1, name: 'Acme laptop', clientId: 1),
+  Asset(id: 2, name: 'Acme server', clientId: 1),
+  Asset(id: 3, name: 'Other printer', clientId: 2),
+];
+
 Widget _app(Widget child) => ProviderScope(
       overrides: [
-        assetsProvider.overrideWith((ref) async => [
-              Asset(id: 1, name: 'Acme laptop', clientId: 1),
-              Asset(id: 2, name: 'Acme server', clientId: 1),
-              Asset(id: 3, name: 'Other printer', clientId: 2),
-            ]),
+        assetsProvider.overrideWith((ref) async => _rows),
+        // Old ITFlow ignores client_id and sends every row back.
+        clientAssetsProvider.overrideWith((ref, id) async => _rows),
         clientProvider.overrideWith((ref, id) async => Client(id: id, name: 'Acme')),
       ],
       child: MaterialApp(home: child),

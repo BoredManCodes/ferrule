@@ -20,11 +20,16 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
   String _search = '';
   bool _favoritesOnly = false;
 
+  AsyncNotifierProvider<CredentialsListNotifier, CredentialsListState>
+      get _list => widget.clientId == null
+          ? credentialsListProvider
+          : clientCredentialsListProvider(widget.clientId!);
+
   @override
   Widget build(BuildContext context) {
     final creds = ref.watch(credentialsProvider).value;
     final decryptSet = (creds?.decryptPassword ?? '').isNotEmpty;
-    final async = ref.watch(credentialsListProvider);
+    final async = ref.watch(_list);
     final cid = widget.clientId;
     final clientName =
         cid == null ? null : ref.watch(clientProvider(cid)).value?.name;
@@ -35,7 +40,7 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
         actions: [
           IconButton(
             tooltip: 'Refresh',
-            onPressed: () => ref.invalidate(credentialsListProvider),
+            onPressed: () => ref.invalidate(_list),
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -96,7 +101,7 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                     error: (e, _) => ErrorView(
                       error: e,
                       onRetry: () =>
-                          ref.invalidate(credentialsListProvider),
+                          ref.invalidate(_list),
                     ),
                     data: (s) {
                       final filtered = s.items.where((c) {
@@ -119,7 +124,7 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
 
                       return RefreshIndicator(
                         onRefresh: () async =>
-                            ref.invalidate(credentialsListProvider),
+                            ref.invalidate(_list),
                         child: NotificationListener<ScrollNotification>(
                           onNotification: (n) {
                             if (n.metrics.pixels >=
@@ -127,7 +132,7 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                                 !s.loadingMore &&
                                 !s.allLoaded) {
                               ref
-                                  .read(credentialsListProvider.notifier)
+                                  .read(_list.notifier)
                                   .retryMore();
                             }
                             return false;
@@ -140,6 +145,7 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
                               if (i == filtered.length) {
                                 return _LoadMoreFooter(
                                     state: s,
+                                    list: _list,
                                     shown: cid == null ? null : filtered.length);
                               }
                               final c = filtered[i];
@@ -182,9 +188,12 @@ class _CredentialsScreenState extends ConsumerState<CredentialsScreen> {
 
 class _LoadMoreFooter extends ConsumerWidget {
   final CredentialsListState state;
+  final AsyncNotifierProvider<CredentialsListNotifier, CredentialsListState>
+      list;
   /// Count to show instead of everything loaded, for a filtered list.
   final int? shown;
-  const _LoadMoreFooter({required this.state, this.shown});
+  const _LoadMoreFooter(
+      {required this.state, required this.list, this.shown});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -217,7 +226,7 @@ class _LoadMoreFooter extends ConsumerWidget {
             const SizedBox(height: 8),
             FilledButton.tonal(
               onPressed: () =>
-                  ref.read(credentialsListProvider.notifier).retryMore(),
+                  ref.read(list.notifier).retryMore(),
               child: const Text('Retry'),
             ),
           ],
@@ -321,6 +330,7 @@ class _DecryptPasswordPromptState
                           .read(credentialsProvider.notifier)
                           .setDecryptPassword(pw);
                       ref.invalidate(credentialsListProvider);
+                      ref.invalidate(clientCredentialsListProvider);
                     },
                     child: const Text('Unlock'),
                   ),

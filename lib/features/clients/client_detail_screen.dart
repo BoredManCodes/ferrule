@@ -156,11 +156,7 @@ class _ClientBody extends ConsumerWidget {
     final tickets = ticketsAsync.value
         ?.where((t) => t.clientId == client.id)
         .toList();
-    final clientAssets = ref
-        .watch(assetsProvider)
-        .value
-        ?.where((a) => a.clientId == client.id)
-        .toList();
+    final clientAssets = ref.watch(clientAssetsProvider(client.id)).value;
     final openTickets = tickets?.where((t) => !t.isResolved).length;
     final closedTickets = tickets?.where((t) => t.isResolved).length;
 
@@ -170,7 +166,7 @@ class _ClientBody extends ConsumerWidget {
         ref.invalidate(clientLocationsProvider(client.id));
         ref.invalidate(contactsProvider);
         ref.invalidate(ticketsProvider);
-        ref.invalidate(assetsProvider);
+        ref.invalidate(clientAssetsProvider(client.id));
         ref.invalidate(clientBannersProvider(client.id));
       },
       child: ListView(

@@ -13,12 +13,17 @@ class CredentialRepository {
   Future<List<Credential>> fetchPage({
     required int offset,
     required int pageSize,
+    int? clientId,
   }) async {
     final client = requireClient(ref);
     final resp = await client.get(
       'credentials',
       'read',
-      query: {'limit': pageSize, 'offset': offset},
+      query: {
+        'limit': pageSize,
+        'offset': offset,
+        'client_id': ?clientId,
+      },
       includeDecrypt: true,
     );
     if (!resp.success) {
@@ -120,6 +125,10 @@ class CredentialsListState {
 }
 
 class CredentialsListNotifier extends AsyncNotifier<CredentialsListState> {
+  /// Only this client's credentials when set.
+  final int? clientId;
+  CredentialsListNotifier([this.clientId]);
+
   static const int pageSize = 50;
   static const int maxItems = 50000;
 
@@ -131,7 +140,8 @@ class CredentialsListNotifier extends AsyncNotifier<CredentialsListState> {
     ref.onDispose(() => _disposed = true);
     await ref.watch(credentialsProvider.future);
     final repo = ref.read(credentialRepositoryProvider);
-    final batch = await repo.fetchPage(offset: 0, pageSize: pageSize);
+    final batch = await repo.fetchPage(
+        offset: 0, pageSize: pageSize, clientId: clientId);
     ref.read(credentialLoadProgressProvider.notifier).set(batch.length);
     final done = batch.length < pageSize;
     if (!done) {
@@ -158,7 +168,7 @@ class CredentialsListNotifier extends AsyncNotifier<CredentialsListState> {
       while (!_disposed && working.length < maxItems) {
         final repo = ref.read(credentialRepositoryProvider);
         final batch = await repo.fetchPage(
-            offset: working.length, pageSize: pageSize);
+            offset: working.length, pageSize: pageSize, clientId: clientId);
         if (_disposed) return;
         if (batch.isEmpty) {
           state = AsyncValue.data(
@@ -206,6 +216,12 @@ final credentialLoadProgressProvider =
 final credentialsListProvider = AsyncNotifierProvider.autoDispose<
     CredentialsListNotifier,
     CredentialsListState>(CredentialsListNotifier.new);
+
+/// Same list for one client. Old ITFlow ignores client_id, so the screen
+/// still filters what comes back.
+final clientCredentialsListProvider = AsyncNotifierProvider.autoDispose
+    .family<CredentialsListNotifier, CredentialsListState, int>(
+        CredentialsListNotifier.new);
 
 final credentialProvider =
     FutureProvider.autoDispose.family<Credential?, int>((ref, id) async {
