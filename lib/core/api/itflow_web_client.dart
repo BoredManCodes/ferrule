@@ -11,6 +11,7 @@ import '../../features/invoices/payment_form_data.dart';
 import '../../features/tickets/reply_model.dart';
 import '../../features/trips/trip.dart';
 import '../../features/trips/trip_form_data.dart';
+import '../auth/mfa_bridge.dart';
 import 'api_response.dart';
 
 /// Drives the ITFlow web UI directly (login + agent/post.php).
@@ -48,52 +49,143 @@ class ItflowWebClient {
     await login();
   }
 
+  Future<void>? _loginInFlight;
+
   /// Logs in. Throws [ApiException] with a useful message on failure.
-  Future<void> login() async {
-    final form = FormData.fromMap({
+  ///
+  /// Accounts with 2FA: a stored remember-me cookie skips the code. Without
+  /// one (or once it expires) [MfaBridge.prompt] asks for the code, and
+  /// the login ticks ITFlow's "Remember this browser" so the next one
+  /// doesn't have to.
+  Future<void> login() =>
+      _loginInFlight ??= _login().whenComplete(() => _loginInFlight = null);
+
+  Future<void> _login({bool retried = false}) async {
+    final remembered = await MfaBridge.rememberToken(_root, email);
+    if (remembered != null) {
+      await _cookies.saveFromResponse(Uri.parse('$_root/'), [
+        Cookie(_rememberCookie, remembered)..path = '/',
+      ]);
+    }
+
+    var resp = await _postLogin({
       'login': '1',
       'email': email,
       'password': password,
     });
-    final resp = await _dio.post(
+    _throwIfLockedOut(resp);
+
+    if (_pendingMfaToken(resp) != null) {
+      final done = await MfaBridge.serialize(() async {
+        final stored = await MfaBridge.rememberToken(_root, email);
+        // Another login saved a fresh cookie while this one waited: use it.
+        if (!retried && stored != null && stored != remembered) return null;
+        // The cookie we sent didn't get us past 2FA, so it's dead.
+        if (stored != null && stored == remembered) {
+          await MfaBridge.saveRememberToken(_root, email, null);
+        }
+        return _completeMfa(resp);
+      });
+      if (done == null) return _login(retried: true);
+      resp = done;
+    }
+
+    if (!_redirectedAway(resp)) {
+      throw ApiException('Login failed. Check email and password.');
+    }
+    _loggedIn = true;
+    _csrfToken = null;
+  }
+
+  static const _rememberCookie = 'rememberme';
+
+  Future<Response<dynamic>> _postLogin(Map<String, String> fields) {
+    return _dio.post(
       '$_root/login.php',
-      data: form,
+      data: FormData.fromMap(fields),
       options: Options(
         headers: {'Referer': '$_root/login.php'},
         contentType: Headers.formUrlEncodedContentType,
       ),
     );
+  }
 
-    final body = resp.data?.toString() ?? '';
+  // ITFlow redirects (302) away from login.php on success.
+  bool _redirectedAway(Response<dynamic> resp) {
     final loc = resp.headers.value('location');
-    // ITFlow redirects (302) away from login.php on success.
-    final redirectedAway =
-        loc != null && !loc.toLowerCase().contains('login.php');
-    final mfaRequired =
-        body.toLowerCase().contains('mfa') ||
-        body.toLowerCase().contains('two-factor');
-    final lockedOut =
-        resp.statusCode == 429 ||
-        body.contains('Too Many Requests') ||
-        body.contains('blocked due to repeated');
+    return loc != null && !loc.toLowerCase().contains('login.php');
+  }
 
-    if (lockedOut) {
+  void _throwIfLockedOut(Response<dynamic> resp) {
+    final body = resp.data?.toString() ?? '';
+    if (body.contains('Too many incorrect 2FA codes')) {
+      throw ApiException(
+        'Too many wrong 2FA codes. ITFlow locks sign-in for 10 minutes.',
+        statusCode: 429,
+      );
+    }
+    if (resp.statusCode == 429 ||
+        body.contains('Too Many Requests') ||
+        body.contains('blocked due to repeated')) {
       throw ApiException(
         'IP temporarily blocked by ITFlow (too many failed logins). Wait ~10 min.',
         statusCode: 429,
       );
     }
-    if (mfaRequired && !redirectedAway) {
-      throw ApiException(
-        '2FA is enabled on this account. Web automation requires 2FA disabled (or a future TOTP prompt).',
-      );
-    }
-    if (!redirectedAway) {
-      throw ApiException('Login failed — check email and password.');
-    }
+  }
 
-    _loggedIn = true;
-    _csrfToken = null;
+  /// The hidden `pending_mfa_token` ITFlow renders on its 2FA step, or
+  /// null when the response isn't that step.
+  String? _pendingMfaToken(Response<dynamic> resp) {
+    if (_redirectedAway(resp)) return null;
+    final body = resp.data?.toString() ?? '';
+    if (!body.contains('pending_mfa_token')) return null;
+    final v = html_parser
+        .parse(body)
+        .querySelector('input[name="pending_mfa_token"]')
+        ?.attributes['value'];
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
+  /// Asks for the 2FA code and submits it, up to three tries. Returns the
+  /// successful response and stores ITFlow's new remember-me cookie.
+  Future<Response<dynamic>> _completeMfa(Response<dynamic> first) async {
+    var resp = first;
+    String? error;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      final pending = _pendingMfaToken(resp);
+      if (pending == null) {
+        throw ApiException('2FA sign-in timed out. Try again.');
+      }
+      final prompt = MfaBridge.prompt;
+      if (prompt == null) {
+        throw ApiException(
+            'This account uses 2FA. Open Ferrule to enter a code.');
+      }
+      final code = await prompt(email: email, error: error);
+      if (code == null || code.trim().isEmpty) {
+        throw ApiException('Sign-in cancelled: a 2FA code is needed.');
+      }
+      resp = await _postLogin({
+        'mfa_login': '1',
+        'pending_mfa_token': pending,
+        'current_code': code.replaceAll(RegExp(r'\s'), ''),
+        'remember_me': 'on',
+      });
+      _throwIfLockedOut(resp);
+      if (_redirectedAway(resp)) {
+        final cookies = await _cookies.loadForRequest(Uri.parse('$_root/'));
+        final fresh =
+            cookies.where((c) => c.name == _rememberCookie).firstOrNull;
+        if (fresh != null && fresh.value.isNotEmpty) {
+          await MfaBridge.saveRememberToken(_root, email, fresh.value);
+        }
+        return resp;
+      }
+      error = 'That code didn\'t work. Check the time on your phone '
+          'and try the newest code.';
+    }
+    throw ApiException('2FA code rejected three times. Sign in again.');
   }
 
   Future<String> _getCsrf() async {

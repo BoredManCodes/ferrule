@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/api/itflow_web_client.dart';
 import 'core/api/providers.dart';
 import 'core/auth/api_key_provisioning.dart';
+import 'core/auth/mfa_bridge.dart';
+import 'core/auth/mfa_prompt_dialog.dart';
 import 'core/router.dart';
 import 'core/settings/app_settings.dart';
 import 'core/storage/secure_store.dart';
@@ -22,6 +24,12 @@ class _FerruleAppState extends ConsumerState<FerruleApp> {
   @override
   void initState() {
     super.initState();
+    MfaBridge.prompt = ({required String email, String? error}) async {
+      final ctx =
+          ref.read(routerProvider).routerDelegate.navigatorKey.currentContext;
+      if (ctx == null || !ctx.mounted) return null;
+      return showMfaPromptDialog(ctx, email: email, error: error);
+    };
     // After login, opportunistically scrape the ITFlow instance's accent color
     // so the app re-skins to match. Only when the user has chosen "auto".
     ref.listenManual<AsyncValue<Credentials?>>(credentialsProvider,

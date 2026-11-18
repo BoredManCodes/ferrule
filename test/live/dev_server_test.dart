@@ -8,7 +8,7 @@
 // Skipped unless FERRULE_LIVE=1, so plain `flutter test` stays offline:
 //   FERRULE_LIVE=1 flutter test test/live
 // Point it elsewhere with FERRULE_LIVE_URL / _EMAIL / _PASSWORD (the account
-// must be an admin, and needs no 2FA).
+// must be an admin, and needs no 2FA: the suite has no one to type a code).
 @Tags(['live'])
 library;
 

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../auth/mfa_bridge.dart';
 import '../storage/secure_store.dart';
 import 'itflow_client.dart';
 import 'itflow_web_client.dart';
@@ -22,6 +23,7 @@ class CredentialsController extends AsyncNotifier<Credentials?> {
   Future<void> logout() async {
     final store = ref.read(secureStoreProvider);
     await store.clear();
+    await MfaBridge.clearAll();
     state = const AsyncValue.data(null);
   }
 

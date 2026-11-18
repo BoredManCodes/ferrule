@@ -234,7 +234,8 @@ class SettingsScreen extends ConsumerWidget {
             padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Text(
               'These credentials drive the ITFlow web UI to log time on tickets. '
-              '2FA on this account is not supported.',
+              'With 2FA on, Ferrule asks for a code and then remembers this '
+              'device for as long as your ITFlow allows.',
               style: TextStyle(fontSize: 12),
             ),
           ),
