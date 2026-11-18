@@ -102,6 +102,16 @@ API additions live in [BoredManCodes/itflow](https://github.com/BoredManCodes/it
 
 All additions follow the existing `validate_api_key.php` + `LIKE '$client_id'` scoping pattern and are designed to be upstreamable.
 
+## `$ ferrule --beta`
+
+Ferrule is in closed testing on Google Play. Anyone can join:
+
+1. Join the [ferrule-beta Google Group](https://groups.google.com/g/ferrule-beta). Nothing gets emailed to it; membership is just the access list.
+2. Opt in at [play.google.com/apps/testing/au.com.bordertechsolutions.ferrule](https://play.google.com/apps/testing/au.com.bordertechsolutions.ferrule) with the same Google account.
+3. Install Ferrule from the Play Store. It can take a few minutes after opting in before the listing shows up.
+
+Rather sideload? Grab the APK from [Releases](https://github.com/BoredManCodes/ferrule/releases).
+
 ## `$ ferrule --install`
 
 ```pwsh

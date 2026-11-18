@@ -10,5 +10,3 @@ node_modules/
 # Local-only Play Console exploration/inspection scripts
 explore-closed-testing.mjs
 inspect-closed-testing.mjs
-promote-closed-testing.mjs
-send-for-review.mjs
