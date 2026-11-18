@@ -59,6 +59,12 @@ try {
 async function main() {
   const page = ctx.pages()[0] ?? (await ctx.newPage());
 
+  // Play pops a "help us improve" survey iframe that sits over the buttons
+  // and eats clicks. Remove it whenever it shows up.
+  await page.addLocatorHandler(page.locator('#google-hats-survey'), async () => {
+    await page.evaluate(() => document.getElementById('google-hats-survey')?.remove());
+  }, { noWaitAfter: true });
+
   const snap = async (name) => {
     try {
       const path = resolve(__dirname, `.send-for-review-${name}.png`);
