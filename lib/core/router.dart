@@ -45,6 +45,30 @@ import 'settings/app_settings.dart';
 import 'settings/crash_consent.dart';
 import 'settings/ui_prefs.dart';
 
+/// Where to send someone at [loc], or null to stay. Gates in order:
+/// crash consent, sign-in, app lock, then the welcome tour. Each gate's
+/// own screen is left alone while that gate is open, so two gates can't
+/// bounce between each other (1.2.1 looped /consent <-> /welcome).
+String? appRedirect({
+  required String loc,
+  required bool loggedIn,
+  required bool consentNeeded,
+  required bool lockRequired,
+  required bool tourDone,
+}) {
+  // Privacy policy is always reachable; it has to be readable before
+  // the user agrees to anything (consent, sign-in, app lock).
+  if (loc == '/privacy') return null;
+  String? go(String to) => to == loc ? null : to;
+
+  if (consentNeeded) return go('/consent');
+  if (!loggedIn) return go('/setup');
+  if (lockRequired) return go('/lock');
+  if (loc == '/consent' || loc == '/setup' || loc == '/lock') return '/';
+  if (!tourDone) return go('/welcome');
+  return null;
+}
+
 final routerProvider = Provider<GoRouter>((ref) {
   // Don't `watch` credentialsProvider here — that would rebuild the whole
   // GoRouter on every auth change and reset the navigation stack. Instead,
@@ -62,30 +86,14 @@ final routerProvider = Provider<GoRouter>((ref) {
           ui.isLoading) {
         return null;
       }
-      final loggedIn = auth.value != null;
-      final consentNeeded =
-          sentryConfigured && consent.value == CrashConsent.unset;
-      final lockRequired = ref.read(lockRequiredProvider);
-      final loc = state.matchedLocation;
-      final atConsent = loc == '/consent';
-      final atSetup = loc == '/setup';
-      final atLock = loc == '/lock';
-      final atPrivacy = loc == '/privacy';
-      // Privacy policy is always reachable — it has to be readable before
-      // the user agrees to anything (consent, sign-in, app lock).
-      if (atPrivacy) return null;
-      if (consentNeeded && !atConsent) return '/consent';
-      if (!consentNeeded && atConsent) return loggedIn ? '/' : '/setup';
-      if (!loggedIn && !atSetup && !atConsent) return '/setup';
-      if (!loggedIn && atLock) return '/setup';
-      if (loggedIn && atSetup) return lockRequired ? '/lock' : '/';
-      if (lockRequired && !atLock) return '/lock';
-      if (!lockRequired && atLock) return '/';
-      // First sign-in on this device: the welcome tour, once.
-      final atWelcome = loc == '/welcome';
-      final tourDone = ui.value?.tourDone ?? true;
-      if (loggedIn && !tourDone && !atWelcome) return '/welcome';
-      return null;
+      return appRedirect(
+        loc: state.matchedLocation,
+        loggedIn: auth.value != null,
+        consentNeeded:
+            sentryConfigured && consent.value == CrashConsent.unset,
+        lockRequired: ref.read(lockRequiredProvider),
+        tourDone: ui.value?.tourDone ?? true,
+      );
     },
     refreshListenable: _AuthListenable(ref),
     routes: [
