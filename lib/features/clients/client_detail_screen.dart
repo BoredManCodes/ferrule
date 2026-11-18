@@ -11,6 +11,7 @@ import '../contacts/contact_repository.dart';
 import '../tickets/ticket_repository.dart';
 import 'client_model.dart';
 import 'client_repository.dart';
+import '../banners/agent_banners.dart';
 
 class ClientDetailScreen extends ConsumerWidget {
   final int id;
@@ -35,10 +36,20 @@ class ClientDetailScreen extends ConsumerWidget {
               icon: const Icon(Icons.unarchive_outlined),
               onPressed: () => _unarchive(context, ref),
             ),
+          if (ref.watch(clientBannersProvider(id)).value?.canEdit ?? false)
+            IconButton(
+              tooltip: 'Banners',
+              icon: const Icon(Icons.campaign_outlined),
+              onPressed: () => context.push(Uri(path: '/banners', queryParameters: {
+                'client_id': '$id',
+                if (async.value?.name != null) 'client_name': async.value!.name!,
+              }).toString()),
+            ),
           IconButton(
             tooltip: 'Refresh',
             icon: const Icon(Icons.refresh),
             onPressed: () {
+              ref.invalidate(clientBannersProvider(id));
               ref.invalidate(clientProvider(id));
               ref.invalidate(clientLocationsProvider(id));
               ref.invalidate(contactsProvider);
@@ -153,10 +164,15 @@ class _ClientBody extends ConsumerWidget {
         ref.invalidate(clientLocationsProvider(client.id));
         ref.invalidate(contactsProvider);
         ref.invalidate(ticketsProvider);
+        ref.invalidate(clientBannersProvider(client.id));
       },
       child: ListView(
         padding: const EdgeInsets.symmetric(vertical: 16),
         children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: AgentBannerStrip(clientId: client.id),
+          ),
           _Header(client: client),
           if (primaryLocation != null) ...[
             const SectionHeader('Primary Location'),

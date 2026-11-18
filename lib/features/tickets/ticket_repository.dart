@@ -58,9 +58,11 @@ class TicketRepository {
     int vendorId = 0,
     String? vendorTicketNumber,
     bool billable = false,
+    int clientId = 0,
   }) async {
     final client = requireClient(ref);
     final resp = await client.post('tickets', 'create', body: {
+      if (clientId > 0) 'client_id': clientId,
       'ticket_subject': subject,
       'ticket_details': details ?? '',
       'ticket_priority': priority,
@@ -75,44 +77,55 @@ class TicketRepository {
     return (id: resp.insertId, error: null);
   }
 
-  Future<bool> resolve(int ticketId) async {
+  /// Resolves a ticket. [clientId] is the ticket's client: an API key that
+  /// can reach every client only matches the ticket when it's sent.
+  Future<({bool ok, String? error})> resolve(int ticketId,
+      {int clientId = 0}) async {
     final client = requireClient(ref);
-    final resp = await client.post('tickets', 'resolve', body: {
-      'ticket_id': ticketId,
-    });
-    return resp.success;
+    try {
+      final resp = await client.post('tickets', 'resolve', body: {
+        'ticket_id': ticketId,
+        if (clientId > 0) 'client_id': clientId,
+      });
+      return (ok: resp.success, error: resp.success ? null : resp.message);
+    } on ApiException catch (e) {
+      return (ok: false, error: e.message);
+    }
   }
 
-  /// Posts a reply via the REST API. Works without agent web credentials but
-  /// only supports Internal (3) and Public no-email (1). For Public + email
-  /// (2) the caller must fall back to the web client path on
-  /// [ItflowWebClient.addTicketReply].
+  /// Posts a reply via the REST API (`ticket_replies/create`). Works without
+  /// agent web credentials. The API knows two kinds: Internal (0) and Public,
+  /// which always emails the contact and watchers (2). A public note that
+  /// isn't emailed (1) has no API equivalent, so it needs the web client
+  /// ([ItflowWebClient.addTicketReply]).
   ///
-  /// Returns ok=true on success. status defaults to 0 which means "no status
-  /// change"; pass 1-4 to update.
+  /// [status] 0 leaves the ticket status alone.
   Future<({bool ok, String? error})> addReply({
     required int ticketId,
     required String body,
-    int replyType = 3,
+    int replyType = 0,
     int status = 0,
+    int clientId = 0,
     Duration timeWorked = Duration.zero,
   }) async {
-    if (replyType == 2) {
+    if (replyType == 1) {
       return (
         ok: false,
-        error: 'Public + email replies need agent credentials in Settings.'
+        error:
+            'Public notes without an email need agent email + password in Settings.'
       );
     }
     final client = requireClient(ref);
+    String two(int n) => n.toString().padLeft(2, '0');
     try {
-      final resp = await client.post('tickets/replies', 'create', body: {
+      final resp = await client.post('ticket_replies', 'create', body: {
         'ticket_id': ticketId,
+        if (clientId > 0) 'client_id': clientId,
         'ticket_reply': body,
-        'public_reply_type': replyType,
-        if (status > 0) 'status': status,
-        'hours': timeWorked.inHours,
-        'minutes': timeWorked.inMinutes % 60,
-        'seconds': timeWorked.inSeconds % 60,
+        'ticket_reply_type': replyType == 2 ? 'Public' : 'Internal',
+        if (status > 0) 'ticket_status': status,
+        'ticket_reply_time_worked':
+            '${two(timeWorked.inHours)}:${two(timeWorked.inMinutes % 60)}:${two(timeWorked.inSeconds % 60)}',
       });
       if (!resp.success) return (ok: false, error: resp.message ?? 'Failed');
       return (ok: true, error: null);
@@ -121,12 +134,14 @@ class TicketRepository {
     }
   }
 
-  /// Edits subject/details/priority on an existing ticket (web UI route — the
-  /// v1 API has no ticket update endpoint). Preserves every other field by
-  /// reading the current ticket first.
+  /// Edits subject/details/priority on an existing ticket. Uses the REST
+  /// `tickets/update` endpoint, which keeps every field it isn't sent, so a
+  /// ticket's other assets, tags and schedule stay as they were. Falls back
+  /// to the web form on servers without that endpoint.
   ///
   /// If [newClientId] is provided and differs from the current client, the
-  /// ticket is reassigned to that client first (which resets the contact to 0).
+  /// ticket is moved to that client first through the web UI (no API for
+  /// it), which resets the contact to 0.
   Future<({bool ok, String? error})> edit({
     required int ticketId,
     String? subject,
@@ -135,39 +150,60 @@ class TicketRepository {
     int? newClientId,
   }) async {
     final web = ref.read(itflowWebClientProvider);
-    if (web == null) {
-      return (
-        ok: false,
-        error:
-            'Agent email + password not set. Add them in Settings to enable edits.'
-      );
-    }
     final current = await get(ticketId);
     if (current == null) {
       return (ok: false, error: 'Ticket $ticketId not found.');
     }
     try {
-      // Handle client change first so subsequent edit_ticket sees the right
-      // contact context. ITFlow zeroes the contact when client changes.
+      var clientId = current.clientId ?? 0;
       var effectiveContactId = current.contactId ?? 0;
-      if (newClientId != null && newClientId != (current.clientId ?? 0)) {
+      if (newClientId != null && newClientId != clientId) {
+        if (web == null) {
+          return (
+            ok: false,
+            error:
+                'Moving a ticket to another client needs agent email + password in Settings.'
+          );
+        }
         await web.changeTicketClient(
           ticketId: ticketId,
           newClientId: newClientId,
           newContactId: 0,
         );
+        clientId = newClientId;
         effectiveContactId = 0;
       }
 
+      final client = requireClient(ref);
+      try {
+        final resp = await client.post('tickets', 'update', body: {
+          'ticket_id': ticketId,
+          'client_id': clientId,
+          'ticket_subject': subject ?? current.subject ?? '',
+          'ticket_details': details ?? current.details ?? '',
+          'ticket_priority': priority ?? current.priority ?? 'Medium',
+        });
+        if (resp.success) return (ok: true, error: null);
+        // "no rows changed" is how ITFlow answers an edit that changed
+        // nothing; that isn't a failure.
+        if ((resp.message ?? '').contains('no rows changed')) {
+          return (ok: true, error: null);
+        }
+        if (web == null) return (ok: false, error: resp.message);
+      } on ApiException catch (e) {
+        if (web == null || e.statusCode != 404) {
+          return (ok: false, error: e.message);
+        }
+      }
+
+      // Older servers: drive the web edit form with every current value.
       final r = current.raw;
       String dueFormatted = '';
       final due = toDate(r['ticket_due_at']);
       if (due != null) {
         // edit_ticket expects Y-m-d\TH:i (HTML <input type="datetime-local">)
-        final iso = due.toIso8601String();
-        dueFormatted = iso.substring(0, 16);
+        dueFormatted = due.toIso8601String().substring(0, 16);
       }
-
       await web.editTicket(
         ticketId: ticketId,
         subject: subject ?? current.subject ?? '',
@@ -187,7 +223,7 @@ class TicketRepository {
       );
       return (ok: true, error: null);
     } catch (e) {
-      return (ok: false, error: e.toString());
+      return (ok: false, error: e is ApiException ? e.message : e.toString());
     }
   }
 }
@@ -223,11 +259,83 @@ final ticketProvider =
   return ref.read(ticketRepositoryProvider).get(id);
 });
 
-/// Replies scraped from the agent ticket page. Requires web credentials.
+/// A ticket's conversation, newest first. Read from the REST API
+/// (`ticket_replies/read`) when the server has it; otherwise scraped from
+/// the agent ticket page, which needs web credentials.
 final ticketRepliesProvider = FutureProvider.autoDispose
     .family<List<TicketReply>, int>((ref, id) async {
   await ref.watch(credentialsProvider.future);
   final web = ref.read(itflowWebClientProvider);
-  if (web == null) return const [];
+  try {
+    final client = requireClient(ref);
+    final out = <TicketReply>[];
+    var offset = 0;
+    const pageSize = 200;
+    while (true) {
+      final resp = await client.get('ticket_replies', 'read', query: {
+        'ticket_id': id,
+        'limit': pageSize,
+        'offset': offset,
+      });
+      final rows = resp.rows;
+      out.addAll(rows
+          .where((r) => r['ticket_reply_archived_at'] == null)
+          .map((r) => ticketReplyFromApi(r)));
+      if (rows.length < pageSize) break;
+      offset += pageSize;
+    }
+    // ITFlow reads them oldest first; the app shows newest first like the
+    // ticket page does.
+    out.sort((a, b) => b.id.compareTo(a.id));
+    return out;
+  } on ApiException catch (e) {
+    if (web == null) rethrow;
+    // 404: an older server without the endpoint. Anything else (a role that
+    // can't read replies over the API): the agent page may still show them.
+    if (e.statusCode != 404 && e.statusCode != 403) rethrow;
+  }
   return web.fetchTicketReplies(id);
+});
+
+typedef ReplyStatus = ({int id, String name, bool selected});
+
+/// Statuses a reply can move the ticket to. Read from the instance's own
+/// reply form when web credentials are set (statuses are configurable);
+/// otherwise ITFlow's built-in Open / On Hold / Resolved, with the ticket's
+/// current status picked.
+final ticketReplyStatusesProvider = FutureProvider.autoDispose
+    .family<List<ReplyStatus>, int>((ref, ticketId) async {
+  await ref.watch(credentialsProvider.future);
+  final web = ref.read(itflowWebClientProvider);
+  if (web != null) {
+    try {
+      final list = await web.fetchReplyStatuses(ticketId);
+      if (list.isNotEmpty) return list;
+    } catch (_) {/* fall back to the built-ins */}
+  }
+  final ticket = await ref.read(ticketRepositoryProvider).get(ticketId);
+  final current = ticket?.statusId ?? 2;
+  const builtIn = {2: 'Open', 3: 'On Hold', 4: 'Resolved'};
+  return [
+    for (final e in builtIn.entries)
+      (id: e.key, name: e.value, selected: e.key == current),
+  ];
+});
+
+/// Agent names by user id, from `technicians/read`. Empty when the server
+/// or the key's role doesn't offer it; callers fall back to "User #id".
+final technicianNamesProvider =
+    FutureProvider.autoDispose<Map<int, String>>((ref) async {
+  await ref.watch(credentialsProvider.future);
+  try {
+    final resp = await requireClient(ref)
+        .get('technicians', 'read', query: {'limit': 500});
+    return {
+      for (final r in resp.rows)
+        if (toInt(r['technician_id']) != null)
+          toInt(r['technician_id'])!: (r['technician_name'] ?? '').toString(),
+    };
+  } catch (_) {
+    return const {};
+  }
 });

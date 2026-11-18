@@ -9,6 +9,7 @@ import '../tickets/ticket_repository.dart';
 import 'log_reply_sheet.dart';
 import 'time_log_history.dart';
 import 'timer_state.dart';
+import '../onboarding/tips.dart';
 
 class TimerScreen extends ConsumerWidget {
   const TimerScreen({super.key});
@@ -23,6 +24,12 @@ class TimerScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          const FirstVisitTip(
+            id: 'timer',
+            margin: EdgeInsets.only(bottom: 12),
+            text:
+                'Start the timer from a ticket, or pick one here. It keeps running while you use the app or close it. Stop it to log the time to the ticket with a note; Save Locally keeps it on this phone only.',
+          ),
           timer.when(
             loading: () => const _LoadingCard(),
             error: (e, _) => Card(

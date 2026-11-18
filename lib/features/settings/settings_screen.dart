@@ -3,11 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/api/api_response.dart';
 import '../../core/api/providers.dart';
+import '../../core/auth/api_key_provisioning.dart';
 import '../../core/auth/app_lock.dart';
 import '../../core/sentry/sentry_config.dart';
 import '../../core/settings/app_settings.dart';
 import '../../core/settings/crash_consent.dart';
+import '../../core/settings/ui_prefs.dart';
+import '../../core/storage/secure_store.dart';
 import '../easter_eggs/snake_game.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -111,6 +115,13 @@ class SettingsScreen extends ConsumerWidget {
                   .setThemeMode(s.first),
             ),
           ),
+          ListTile(
+            leading: const Icon(Icons.tune),
+            title: const Text('Navigation'),
+            subtitle: const Text('Choose what goes on the bottom bar'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.push('/settings/navigation'),
+          ),
           const Divider(),
           const _SectionHeader('Connection'),
           ListTile(
@@ -121,7 +132,13 @@ class SettingsScreen extends ConsumerWidget {
           ListTile(
             leading: const Icon(Icons.key),
             title: const Text('API Key'),
-            subtitle: const Text('Stored securely on device'),
+            subtitle: Text(_apiKeyStatus(creds)),
+            trailing: (creds != null && creds.apiKeyManaged)
+                ? TextButton(
+                    onPressed: () => _rotateApiKeyNow(context, ref, creds),
+                    child: const Text('Rotate now'),
+                  )
+                : null,
           ),
           ListTile(
             leading: const Icon(Icons.lock_outline),
@@ -147,6 +164,15 @@ class SettingsScreen extends ConsumerWidget {
               child: const Text('Change'),
             ),
           ),
+          if (creds != null && creds.hasWebCreds)
+            ListTile(
+              leading: const Icon(Icons.qr_code_2),
+              title: const Text('Set up a technician'),
+              subtitle: const Text(
+                  'Admins: make a setup code so a technician can sign in without an admin account'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => context.push('/settings/setup-code'),
+            ),
           const Divider(),
           const _SectionHeader('Web Session (for Labour Timer)'),
           ListTile(
@@ -227,6 +253,26 @@ class SettingsScreen extends ConsumerWidget {
             subtitle: const Text('How Ferrule handles your data'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push('/privacy'),
+          ),
+          const Divider(),
+          const _SectionHeader('Help'),
+          ListTile(
+            leading: const Icon(Icons.slideshow_outlined),
+            title: const Text('Show the welcome tour'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => context.go('/welcome'),
+          ),
+          ListTile(
+            leading: const Icon(Icons.lightbulb_outline),
+            title: const Text('Show tips again'),
+            subtitle: const Text('The one-time hints on each screen'),
+            onTap: () async {
+              await ref.read(uiPrefsProvider.notifier).resetTips();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('Tips will show again on each screen')));
+              }
+            },
           ),
           const Divider(),
           const _SectionHeader('Support'),
@@ -502,6 +548,66 @@ class _AboutDialog extends StatelessWidget {
       ],
     );
   }
+}
+
+String _apiKeyStatus(Credentials? creds) {
+  if (creds == null) return 'Stored securely on device';
+  if (!creds.apiKeyManaged) {
+    final exp = creds.apiKeyExpiresAt;
+    if (exp != null) {
+      final d = '${exp.year.toString().padLeft(4, '0')}-'
+          '${exp.month.toString().padLeft(2, '0')}-'
+          '${exp.day.toString().padLeft(2, '0')}';
+      return 'From a setup code · works until $d · ask an admin for a new code before then';
+    }
+    return 'Manually entered · stored securely on device';
+  }
+  final expires = creds.apiKeyExpiresAt;
+  if (expires == null) return 'Auto-managed · stored securely on device';
+  final d = '${expires.year.toString().padLeft(4, '0')}-'
+      '${expires.month.toString().padLeft(2, '0')}-'
+      '${expires.day.toString().padLeft(2, '0')}';
+  return 'Auto-managed · renews before $d';
+}
+
+Future<void> _rotateApiKeyNow(
+    BuildContext context, WidgetRef ref, Credentials creds) async {
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const AlertDialog(
+      content: Row(
+        children: [
+          SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2)),
+          SizedBox(width: 16),
+          Text('Rotating API key…'),
+        ],
+      ),
+    ),
+  );
+  String? error;
+  bool rotated = false;
+  try {
+    final updated = await rotateApiKeyIfNeeded(creds, force: true);
+    if (updated != null) {
+      await ref.read(credentialsProvider.notifier).save(updated);
+      rotated = true;
+    } else {
+      error = 'Missing web login credentials to sign in with.';
+    }
+  } catch (e) {
+    error = e is ApiException ? e.message : e.toString();
+  } finally {
+    if (context.mounted) Navigator.of(context, rootNavigator: true).pop();
+  }
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    content:
+        Text(rotated ? 'API key rotated' : 'Rotation failed: $error'),
+  ));
 }
 
 class _SectionHeader extends StatelessWidget {

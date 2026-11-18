@@ -97,7 +97,7 @@ class _EditTicketScreenState extends ConsumerState<EditTicketScreen> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.errorContainer,
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -105,15 +105,15 @@ class _EditTicketScreenState extends ConsumerState<EditTicketScreen> {
                           Icon(Icons.warning_amber,
                               color: Theme.of(context)
                                   .colorScheme
-                                  .onErrorContainer),
+                                  .onSurfaceVariant),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Editing requires agent email + password. Add them in Settings (Web Session).',
+                              'Moving the ticket to another client needs agent email + password in Settings. Subject, details and priority save over the API.',
                               style: TextStyle(
                                 color: Theme.of(context)
                                     .colorScheme
-                                    .onErrorContainer,
+                                    .onSurfaceVariant,
                               ),
                             ),
                           ),
@@ -197,7 +197,7 @@ class _EditTicketScreenState extends ConsumerState<EditTicketScreen> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.errorContainer,
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
@@ -210,7 +210,7 @@ class _EditTicketScreenState extends ConsumerState<EditTicketScreen> {
                   ],
                   const SizedBox(height: 24),
                   FilledButton.icon(
-                    onPressed: _busy || !hasWeb ? null : _save,
+                    onPressed: _busy ? null : _save,
                     icon: _busy
                         ? const SizedBox(
                             width: 16,

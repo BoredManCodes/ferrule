@@ -11,6 +11,12 @@
 #   .\release-internal.ps1 -Track internal       # publish to Internal Testing instead
 #   .\release-internal.ps1 -NoPromote            # leave release as draft on Play Console
 #   .\release-internal.ps1 -DryRun               # build only, no upload, no promote
+#   .\release-internal.ps1 -SkipTests            # skip the unit + live pre-deploy tests
+#
+# Before building it runs the unit tests and the live pre-deploy suite
+# (test/live) against https://develop.dev.itflow.org. That server resets, so
+# the suite creates its own API key and test data every run. Any failure
+# stops the release. Point it elsewhere with FERRULE_LIVE_URL/_EMAIL/_PASSWORD.
 #
 # First-time setup for browser promote:
 #   cd scripts
@@ -28,7 +34,8 @@ param(
   [string]$Language = 'en-AU',
   [switch]$SkipBuild,
   [switch]$DryRun,
-  [switch]$NoPromote
+  [switch]$NoPromote,
+  [switch]$SkipTests
 )
 
 $ErrorActionPreference = 'Stop'
@@ -71,6 +78,23 @@ if (-not $ReleaseNotes) {
 } else {
   Write-Host "[release-internal] release notes:"
   $ReleaseNotes -split "`r?`n" | ForEach-Object { Write-Host "  $_" }
+}
+
+if (-not $SkipTests) {
+  Push-Location $AppDir
+  try {
+    Write-Host "[release-internal] unit tests"
+    & flutter test --exclude-tags live
+    if ($LASTEXITCODE -ne 0) { throw "Unit tests failed - not releasing (-SkipTests to override)." }
+    Write-Host "[release-internal] live pre-deploy tests"
+    $env:FERRULE_LIVE = '1'
+    & flutter test test/live
+    $liveExit = $LASTEXITCODE
+    Remove-Item Env:FERRULE_LIVE -ErrorAction SilentlyContinue
+    if ($liveExit -ne 0) { throw "Live pre-deploy tests failed - not releasing (-SkipTests to override)." }
+  } finally {
+    Pop-Location
+  }
 }
 
 $AabPath = Join-Path $AppDir 'build\app\outputs\bundle\release\app-release.aab'

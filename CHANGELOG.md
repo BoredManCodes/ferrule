@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0 - 2026-11-18
+
+- New sign-in screen that asks which kind of account you have and explains each way in: ITFlow admins sign in with email and password, technicians use a setup code, and anyone can still paste an API key.
+- Setup codes for technicians who aren't ITFlow admins. An admin opens Settings, Set up a technician, picks the technician and gets a QR code holding a key that acts as them. The technician scans it, picks it from a screenshot, or pastes the text the admin sent. Nothing to change on the ITFlow server. The key lasts a year and the app warns a month before it runs out.
+- A short welcome tour after signing in, and one-time tips on Home, Tickets, a ticket, the timer, Trips and More. Settings, Help replays the tour and brings the tips back.
+- Choose what's on the bottom bar: More, Customize (or Settings, Navigation) moves any section onto the bar or off it and reorders both lists, so Contacts can sit where Assets was.
+- Sign in with your ITFlow email and password. The app creates its own API key acting as you, renews it before it expires, and revokes the old one. Settings shows when it renews and has Rotate now. Pasting an existing key still works under Advanced.
+- Agent banners from ITFlow show on the home screen, client pages and tickets, the same ones the web UI shows. Notices and Heads ups can be hidden; Urgent ones can't. Agents who can edit a client can add, change, archive and delete its banners, and admins get Agent Banners under More for every client's.
+- Internal notes now stay internal. On current ITFlow the old internal code meant "public and send a text", so notes logged from the app went out as public replies.
+- Reply statuses come from your instance instead of a fixed list that called On Hold "In Progress" and Resolved "Closed". A New ticket starts on Open.
+- Replies load over the API, so the conversation shows without agent credentials. Internal notes and emailed public replies also post over the API; a public note without email still needs agent credentials.
+- Ticket edits save over the API and keep the ticket's other assets and tags. New tickets take a client and contact. Resolving and deleting assets work with keys that reach every client.
+- The ticket page shows the agent's name, the booked time with its end and Onsite, and the due date separately.
+- Works with ITFlow's new look: trips, expenses, payments, replies, statuses and the instance colour are read from the redesigned pages, and the API key is sent in the X-API-Key header instead of the address.
+- When ITFlow turns something away (a missing vendor, an invoice with nothing owed, AI reword not set up) the app now shows ITFlow's own message instead of reporting success.
+
 ## 1.1.2 - 2026-05-16
 
 - Trent Buckley in the About dialog is now a tappable link to his site.

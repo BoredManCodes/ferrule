@@ -1,6 +1,6 @@
 # Privacy Policy — Ferrule
 
-_Last updated: 2026-05-16_
+_Last updated: 2026-11-18_
 
 Ferrule is an unofficial client for [ITFlow](https://itflow.org). It runs entirely on your own device and talks to the ITFlow instance you point it at. There is no Ferrule server, no Ferrule account, and no central database operated by the developer.
 
@@ -9,9 +9,9 @@ Ferrule is an unofficial client for [ITFlow](https://itflow.org). It runs entire
 All of the following are kept in your operating system's secure storage (Keychain on iOS/macOS, Keystore on Android, DPAPI on Windows). Nothing is uploaded anywhere by the app:
 
 - **Instance URL** — the address of your ITFlow installation.
-- **API key** — issued by you in the ITFlow admin UI.
-- **Vault decrypt password** — used locally to read/write encrypted credential entries on your ITFlow instance (optional).
-- **Agent email and password** — used to drive the ITFlow web UI for logging time against tickets, since the v1 API does not expose that endpoint (optional).
+- **API key** — created by the app on your ITFlow instance when you sign in with an admin account (named "Ferrule (Android) - <date>" under Admin > API Keys, acting as you and expiring after 90 days, with a replacement made and the old one revoked before then), or one you paste in yourself.
+- **Vault decrypt password** — the password ITFlow issues alongside the API key, sent to your instance with Vault requests so it can read and write encrypted credential entries.
+- **Agent email and password** — used to sign in to your ITFlow web UI for things the v1 API does not cover: creating and rotating the API key, logging time and public notes on tickets, trips, expenses, payments, PDFs and agent banners.
 - **App preferences** — theme, accent colour, display name, biometric-unlock toggle, crash-report opt-in choice, trip-tracking mode. These live in regular app preferences, not in secure storage.
 - **Active trip state** — while a GPS trip is being tracked, the start time, the starting GPS coordinates, and the reverse-geocoded starting address are saved to secure storage so the trip survives if you close the app. The state is cleared the moment you stop or discard the trip.
 

@@ -36,21 +36,15 @@ class LogReplySheet extends ConsumerStatefulWidget {
 class _LogReplySheetState extends ConsumerState<LogReplySheet> {
   late Duration _duration = widget.duration;
   final _reply = TextEditingController();
-  int _replyType = 3; // Internal by default — safest
-  int _statusId = 3; // In Progress
+  int _replyType = 0; // Internal by default — safest
+  int? _statusId; // null until picked: keeps the ticket's current status
   bool _busy = false;
   String? _error;
   bool _timeExpanded = false; // reply-only: collapsed until user taps
 
-  static const _statuses = {
-    1: 'New',
-    2: 'Open',
-    3: 'In Progress',
-    4: 'Closed',
-  };
-
+  // ITFlow's own reply-form values.
   static const _replyTypes = {
-    3: 'Internal note',
+    0: 'Internal note',
     1: 'Public reply (no email)',
     2: 'Public reply + email',
   };
@@ -59,6 +53,17 @@ class _LogReplySheetState extends ConsumerState<LogReplySheet> {
   void dispose() {
     _reply.dispose();
     super.dispose();
+  }
+
+  int? _currentStatusId() {
+    final list =
+        ref.read(ticketReplyStatusesProvider(widget.ticketId)).value ?? const [];
+    for (final st in list) {
+      if (st.selected) return st.id;
+    }
+    // A New ticket isn't one of the statuses a reply may set; ITFlow's form
+    // starts on the first one (Open) then.
+    return list.isEmpty ? null : list.first.id;
   }
 
   Future<void> _editDuration() async {
@@ -80,44 +85,41 @@ class _LogReplySheetState extends ConsumerState<LogReplySheet> {
     try {
       if (postToItflow) {
         final web = ref.read(itflowWebClientProvider);
-        // Prefer the REST endpoint when:
-        //   - web credentials aren't set (REST is the only option), or
-        //   - the user picked a reply type the REST endpoint supports
-        //     (Internal=3 or Public-no-email=1; Public+email=2 must go
-        //     through the web client because the REST endpoint refuses
-        //     to dispatch mail).
-        final canUseRest = _replyType != 2;
-        if (web == null && canUseRest) {
-          final result = await ref
-              .read(ticketRepositoryProvider)
-              .addReply(
-                ticketId: widget.ticketId,
-                body: _reply.text,
-                replyType: _replyType,
-                status: _statusId,
-                timeWorked: _duration,
-              );
-          if (!result.ok) {
-            throw StateError(result.error ?? 'Reply failed.');
-          }
-        } else if (web != null) {
-          // Need the ticket's client_id to satisfy the form.
-          final ticket =
-              await ref.read(ticketRepositoryProvider).get(widget.ticketId);
-          final clientId = ticket?.clientId ?? 0;
+        final ticket =
+            await ref.read(ticketRepositoryProvider).get(widget.ticketId);
+        final clientId = ticket?.clientId ?? 0;
+        final status = _statusId ?? _currentStatusId() ?? ticket?.statusId ?? 2;
+        // The web form handles every reply type. Without web creds the REST
+        // endpoint covers Internal and Public + email (it always emails on
+        // Public); a public note without email can't go through it.
+        if (web != null) {
           await web.addTicketReply(
             ticketId: widget.ticketId,
             clientId: clientId,
-            statusId: _statusId,
+            statusId: status,
             hours: h,
             minutes: m,
             seconds: s,
             replyText: _reply.text,
             replyType: _replyType,
           );
+        } else if (_replyType != 1) {
+          final result = await ref.read(ticketRepositoryProvider).addReply(
+                ticketId: widget.ticketId,
+                clientId: clientId,
+                body: _reply.text,
+                replyType: _replyType,
+                // Only send a status when it changes; the API refuses some
+                // current statuses (e.g. New) as a reply's status.
+                status: status != ticket?.statusId ? status : 0,
+                timeWorked: _duration,
+              );
+          if (!result.ok) {
+            throw StateError(result.error ?? 'Reply failed.');
+          }
         } else {
           throw StateError(
-              'Public + email replies need agent email + password in Settings.');
+              'Public replies without email need agent email + password in Settings.');
         }
       }
       // Only log to the local time-log history when there's actually time
@@ -180,7 +182,13 @@ class _LogReplySheetState extends ConsumerState<LogReplySheet> {
     // REST can handle Internal + Public-no-email without web creds. Submit
     // is only truly disabled when the user picked Public + email AND there
     // are no web creds to fall back on.
-    final canSubmit = hasWeb || _replyType != 2;
+    final canSubmit = hasWeb || _replyType != 1;
+    final statuses =
+        ref.watch(ticketReplyStatusesProvider(widget.ticketId)).value ??
+            const <ReplyStatus>[];
+    final statusValue = _statusId ??
+        statuses.where((x) => x.selected).map((x) => x.id).firstOrNull ??
+        statuses.firstOrNull?.id;
     return Padding(
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).viewInsets.bottom,
@@ -244,23 +252,25 @@ class _LogReplySheetState extends ConsumerState<LogReplySheet> {
                               value: e.key, child: Text(e.value)),
                       ],
                       onChanged: (v) =>
-                          setState(() => _replyType = v ?? 3),
+                          setState(() => _replyType = v ?? 0),
                     ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: DropdownButtonFormField<int>(
-                      initialValue: _statusId,
+                      key: ValueKey('status-${statuses.length}'),
+                      initialValue: statuses.any((x) => x.id == statusValue)
+                          ? statusValue
+                          : null,
                       isExpanded: true,
                       decoration:
                           const InputDecoration(labelText: 'Status'),
                       items: [
-                        for (final e in _statuses.entries)
+                        for (final st in statuses)
                           DropdownMenuItem(
-                              value: e.key, child: Text(e.value)),
+                              value: st.id, child: Text(st.name)),
                       ],
-                      onChanged: (v) =>
-                          setState(() => _statusId = v ?? 3),
+                      onChanged: (v) => setState(() => _statusId = v),
                     ),
                   ),
                 ],
@@ -334,10 +344,10 @@ class _LogReplySheetState extends ConsumerState<LogReplySheet> {
                     ),
                   ],
                 ),
-              if (!hasWeb && _replyType == 2) ...[
+              if (!hasWeb && _replyType == 1) ...[
                 const SizedBox(height: 8),
                 Text(
-                  'Public + email needs agent email + password in Settings. Pick Internal or Public (no email) to post via the REST API.',
+                  'A public reply without email needs agent email + password in Settings. Internal and Public + email work over the REST API.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),

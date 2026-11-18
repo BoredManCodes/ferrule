@@ -15,6 +15,7 @@ class Ticket {
   final int? assignedTo;
   final DateTime? createdAt;
   final DateTime? resolvedAt;
+  final DateTime? closedAt;
   final String? source;
   final bool billable;
   final Map<String, dynamic> raw;
@@ -34,6 +35,7 @@ class Ticket {
     this.assignedTo,
     this.createdAt,
     this.resolvedAt,
+    this.closedAt,
     this.source,
     this.billable = false,
     this.raw = const {},
@@ -45,8 +47,16 @@ class Ticket {
     return '$p$n';
   }
 
+  /// Built-in ITFlow statuses: 1 New, 2 Open, 3 On Hold, 4 Resolved,
+  /// 5 Closed. Custom statuses get higher ids.
   bool get isResolved =>
-      resolvedAt != null || statusId == 4 || (statusName?.toLowerCase() == 'closed');
+      resolvedAt != null ||
+      closedAt != null ||
+      statusId == 4 ||
+      statusId == 5 ||
+      const {'resolved', 'closed'}.contains(statusName?.toLowerCase());
+
+  bool get isClosed => closedAt != null || statusId == 5;
 
   factory Ticket.fromRow(Map<String, dynamic> r) => Ticket(
         id: toInt(r['ticket_id']) ?? 0,
@@ -63,6 +73,7 @@ class Ticket {
         assignedTo: toInt(r['ticket_assigned_to']),
         createdAt: toDate(r['ticket_created_at']),
         resolvedAt: toDate(r['ticket_resolved_at']),
+        closedAt: toDate(r['ticket_closed_at']),
         source: str(r['ticket_source']),
         billable: toBool(r['ticket_billable']),
         raw: r,

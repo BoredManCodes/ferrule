@@ -13,6 +13,9 @@ import '../easter_eggs/rapid_tap.dart';
 import '../tickets/ticket_repository.dart';
 import '../trips/active_trip.dart';
 import '../trips/trip_actions.dart';
+import '../banners/agent_banners.dart';
+import '../../core/auth/api_key_provisioning.dart';
+import '../onboarding/tips.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -46,10 +49,19 @@ class DashboardScreen extends ConsumerWidget {
           ref.invalidate(assetsProvider);
           ref.invalidate(clientsProvider);
           ref.invalidate(credentialsListProvider);
+          ref.invalidate(globalBannersProvider);
         },
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            const _KeyExpiryWarning(),
+            const AgentBannerStrip(),
+            const FirstVisitTip(
+              id: 'home.welcome',
+              margin: EdgeInsets.only(bottom: 12),
+              text:
+                  'Tap a card to jump to that list. The play button up top starts a trip, and banners your team posts in ITFlow show here.',
+            ),
             Text('Overview',
                 style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 12),
@@ -274,6 +286,41 @@ class _StatCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+
+/// A key from a setup code (or pasted in) can't be renewed by the app, so
+/// say so a month before it stops working.
+class _KeyExpiryWarning extends ConsumerWidget {
+  const _KeyExpiryWarning();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final creds = ref.watch(credentialsProvider).value;
+    final exp = creds?.apiKeyExpiresAt;
+    if (creds == null || creds.apiKeyManaged || exp == null) {
+      return const SizedBox.shrink();
+    }
+    final left = exp.difference(DateTime.now());
+    if (left > keyExpiryWarning) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final days = left.inDays;
+    final when = days <= 0 ? 'today' : 'in $days day${days == 1 ? '' : 's'}';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        'The ITFlow key on this phone stops working $when. Ask an admin to make you '
+        'a new setup code (Ferrule > Settings > Set up a technician), then '
+        'sign out and scan it.',
+        style: TextStyle(color: scheme.onErrorContainer, height: 1.35),
       ),
     );
   }

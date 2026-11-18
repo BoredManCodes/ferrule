@@ -1,37 +1,34 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/settings/ui_prefs.dart';
 import '../timer/timer_banner.dart';
 
-class AppShell extends StatelessWidget {
+const _more = NavDest('/more', Icons.apps_outlined, Icons.apps, 'More');
+
+class AppShell extends ConsumerWidget {
   final Widget child;
   const AppShell({super.key, required this.child});
 
-  static const _destinations = [
-    _NavItem('/', Icons.dashboard_outlined, Icons.dashboard, 'Home'),
-    _NavItem('/tickets', Icons.confirmation_number_outlined,
-        Icons.confirmation_number, 'Tickets'),
-    _NavItem(
-        '/assets', Icons.devices_other_outlined, Icons.devices_other, 'Assets'),
-    _NavItem('/credentials', Icons.vpn_key_outlined, Icons.vpn_key, 'Vault'),
-    _NavItem('/more', Icons.apps_outlined, Icons.apps, 'More'),
-  ];
-
-  int _indexFor(String location) {
-    if (location == '/') return 0;
-    // Check specific tabs (skip Home and the final "More" catch-all).
-    for (var i = 1; i < _destinations.length - 1; i++) {
-      if (location.startsWith(_destinations[i].path)) return i;
+  /// The bar item the location belongs to, or More for anything reached
+  /// from there (sub-pages, settings, items not on the bar).
+  int _indexFor(String location, List<NavDest> dests) {
+    for (var i = 0; i < dests.length - 1; i++) {
+      final p = dests[i].path;
+      if (p == '/' ? location == '/' : (location == p || location.startsWith('$p/'))) {
+        return i;
+      }
     }
-    // Any sub-route the bottom-nav doesn't explicitly map (clients, contacts,
-    // documents, settings, etc.) is reached via the "More" tab — keep it lit.
-    return _destinations.length - 1;
+    return dests.length - 1;
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final prefs = ref.watch(uiPrefsProvider).value ?? const UiPrefs();
+    final dests = [...prefs.barDests, _more];
     final location = GoRouterState.of(context).uri.path;
-    final idx = _indexFor(location);
+    final idx = _indexFor(location, dests);
     final isWide = MediaQuery.of(context).size.width >= 720;
 
     if (isWide) {
@@ -40,14 +37,14 @@ class AppShell extends StatelessWidget {
           children: [
             NavigationRail(
               selectedIndex: idx,
-              onDestinationSelected: (i) => context.go(_destinations[i].path),
+              onDestinationSelected: (i) => context.go(dests[i].path),
               labelType: NavigationRailLabelType.all,
               destinations: [
-                for (final d in _destinations)
+                for (final d in dests)
                   NavigationRailDestination(
                     icon: Icon(d.icon),
                     selectedIcon: Icon(d.selectedIcon),
-                    label: Text(d.label),
+                    label: Text(_short(d.label)),
                   ),
               ],
             ),
@@ -74,24 +71,24 @@ class AppShell extends StatelessWidget {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: idx,
-        onDestinationSelected: (i) => context.go(_destinations[i].path),
+        onDestinationSelected: (i) => context.go(dests[i].path),
         destinations: [
-          for (final d in _destinations)
+          for (final d in dests)
             NavigationDestination(
               icon: Icon(d.icon),
               selectedIcon: Icon(d.selectedIcon),
-              label: d.label,
+              label: _short(d.label),
             ),
         ],
       ),
     );
   }
-}
 
-class _NavItem {
-  final String path;
-  final IconData icon;
-  final IconData selectedIcon;
-  final String label;
-  const _NavItem(this.path, this.icon, this.selectedIcon, this.label);
+  // Bar labels have little room.
+  static String _short(String label) => switch (label) {
+        'Labour Timer' => 'Timer',
+        'Agent Banners' => 'Banners',
+        'Certificates' => 'Certs',
+        _ => label,
+      };
 }

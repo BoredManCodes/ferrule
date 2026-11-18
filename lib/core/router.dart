@@ -6,6 +6,7 @@ import '../features/assets/asset_form_screen.dart';
 import '../features/assets/asset_detail_screen.dart';
 import '../features/assets/asset_scan_screen.dart';
 import '../features/assets/assets_screen.dart';
+import '../features/banners/banner_screens.dart';
 import '../features/clients/client_detail_screen.dart';
 import '../features/clients/clients_screen.dart';
 import '../features/consent/crash_consent_screen.dart';
@@ -19,6 +20,9 @@ import '../features/expenses/expense_form_screen.dart';
 import '../features/invoices/payment_form_screen.dart';
 import '../features/lock/lock_screen.dart';
 import '../features/more/more_screen.dart';
+import '../features/onboarding/welcome_tour_screen.dart';
+import '../features/settings/navigation_settings_screen.dart';
+import '../features/settings/setup_code_screen.dart';
 import '../features/readonly/readonly_screens.dart';
 import '../features/settings/privacy_policy_screen.dart';
 import '../features/settings/settings_screen.dart';
@@ -39,6 +43,7 @@ import 'auth/app_lock.dart';
 import 'sentry/sentry_config.dart';
 import 'settings/app_settings.dart';
 import 'settings/crash_consent.dart';
+import 'settings/ui_prefs.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   // Don't `watch` credentialsProvider here — that would rebuild the whole
@@ -50,7 +55,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       final auth = ref.read(credentialsProvider);
       final consent = ref.read(crashConsentProvider);
       final settings = ref.read(appSettingsProvider);
-      if (auth.isLoading || consent.isLoading || settings.isLoading) {
+      final ui = ref.read(uiPrefsProvider);
+      if (auth.isLoading ||
+          consent.isLoading ||
+          settings.isLoading ||
+          ui.isLoading) {
         return null;
       }
       final loggedIn = auth.value != null;
@@ -72,6 +81,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       if (loggedIn && atSetup) return lockRequired ? '/lock' : '/';
       if (lockRequired && !atLock) return '/lock';
       if (!lockRequired && atLock) return '/';
+      // First sign-in on this device: the welcome tour, once.
+      final atWelcome = loc == '/welcome';
+      final tourDone = ui.value?.tourDone ?? true;
+      if (loggedIn && !tourDone && !atWelcome) return '/welcome';
       return null;
     },
     refreshListenable: _AuthListenable(ref),
@@ -80,6 +93,8 @@ final routerProvider = Provider<GoRouter>((ref) {
           path: '/consent', builder: (_, __) => const CrashConsentScreen()),
       GoRoute(path: '/setup', builder: (_, __) => const SetupScreen()),
       GoRoute(path: '/lock', builder: (_, __) => const LockScreen()),
+      GoRoute(
+          path: '/welcome', builder: (_, __) => const WelcomeTourScreen()),
       GoRoute(
           path: '/privacy',
           builder: (_, __) => const PrivacyPolicyScreen()),
@@ -93,7 +108,10 @@ final routerProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: 'new',
-                builder: (_, __) => const CreateTicketScreen(),
+                builder: (_, s) => CreateTicketScreen(
+                  initialClientId:
+                      int.tryParse(s.uri.queryParameters['client_id'] ?? ''),
+                ),
               ),
               GoRoute(
                 path: ':id',
@@ -152,6 +170,30 @@ final routerProvider = Provider<GoRouter>((ref) {
             ],
           ),
           GoRoute(path: '/more', builder: (_, __) => const MoreScreen()),
+          GoRoute(
+            path: '/banners',
+            builder: (_, s) => BannersScreen(
+              clientId: int.tryParse(s.uri.queryParameters['client_id'] ?? ''),
+              clientName: s.uri.queryParameters['client_name'],
+            ),
+            routes: [
+              GoRoute(
+                path: 'new',
+                builder: (_, s) => BannerFormScreen(
+                  clientId:
+                      int.tryParse(s.uri.queryParameters['client_id'] ?? ''),
+                ),
+              ),
+              GoRoute(
+                path: ':id',
+                builder: (_, s) => BannerFormScreen(
+                  id: int.parse(s.pathParameters['id']!),
+                  clientId:
+                      int.tryParse(s.uri.queryParameters['client_id'] ?? ''),
+                ),
+              ),
+            ],
+          ),
           GoRoute(
             path: '/clients',
             builder: (_, __) => const ClientsScreen(),
@@ -325,7 +367,19 @@ final routerProvider = Provider<GoRouter>((ref) {
             ],
           ),
           GoRoute(
-              path: '/settings', builder: (_, __) => const SettingsScreen()),
+            path: '/settings',
+            builder: (_, __) => const SettingsScreen(),
+            routes: [
+              GoRoute(
+                path: 'navigation',
+                builder: (_, __) => const NavigationSettingsScreen(),
+              ),
+              GoRoute(
+                path: 'setup-code',
+                builder: (_, __) => const SetupCodeScreen(),
+              ),
+            ],
+          ),
         ],
       ),
     ],
@@ -338,5 +392,6 @@ class _AuthListenable extends ChangeNotifier {
     ref.listen(crashConsentProvider, (_, __) => notifyListeners());
     ref.listen(appSettingsProvider, (_, __) => notifyListeners());
     ref.listen(appLockProvider, (_, __) => notifyListeners());
+    ref.listen(uiPrefsProvider, (_, __) => notifyListeners());
   }
 }

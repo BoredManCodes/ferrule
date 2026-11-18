@@ -8,6 +8,7 @@ import 'active_trip.dart';
 import 'trip.dart';
 import 'trip_actions.dart';
 import 'trip_repository.dart';
+import '../onboarding/tips.dart';
 
 class TripsScreen extends ConsumerWidget {
   const TripsScreen({super.key});
@@ -28,6 +29,12 @@ class TripsScreen extends ConsumerWidget {
           padding: const EdgeInsets.all(16),
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
+            const FirstVisitTip(
+              id: 'trips',
+              margin: EdgeInsets.only(bottom: 12),
+              text:
+                  'Start a trip when you leave and stop it when you arrive. In GPS mode the distance is worked out for you; in manual mode you type it. Either way you check the details before it is saved to ITFlow.',
+            ),
             if (!hasWebCreds) ...[
               const _NeedsAgentCredsBanner(),
               const SizedBox(height: 16),

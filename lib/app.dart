@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/api/itflow_web_client.dart';
 import 'core/api/providers.dart';
+import 'core/auth/api_key_provisioning.dart';
 import 'core/router.dart';
 import 'core/settings/app_settings.dart';
 import 'core/storage/secure_store.dart';
@@ -28,18 +29,58 @@ class _FerruleAppState extends ConsumerState<FerruleApp> {
       final c = next.value;
       if (c != null && c != _lastSeenCreds) {
         _lastSeenCreds = c;
-        _maybeRefreshBranding();
+        _onNewCredentials(c);
       } else if (c == null) {
         _lastSeenCreds = null;
       }
     });
   }
 
+  /// Runs after every credentials change. Sequenced (branding then
+  /// rotation, rather than fired concurrently) so a fresh login for the
+  /// accent scrape doesn't race the login that just finished provisioning
+  /// the API key.
+  Future<void> _onNewCredentials(Credentials c) async {
+    await _maybeRefreshBranding();
+    await _maybeRotateApiKey(c);
+  }
+
+  /// Opportunistically rotates the app-created API key when it's nearing
+  /// expiry. No-op for manually-pasted keys or when nothing's due yet; see
+  /// [rotateApiKeyIfNeeded].
+  Future<void> _maybeRotateApiKey(Credentials creds) async {
+    final updated = await rotateApiKeyIfNeeded(creds);
+    if (updated == null) return;
+    // The rotation ran against a snapshot; only persist if the user hasn't
+    // changed credentials again in the meantime.
+    if (ref.read(credentialsProvider).value != creds) return;
+    // Set before saving: `save()` notifies this same listener synchronously,
+    // and the freshly-rotated key won't be due again, so this just avoids a
+    // redundant recursive rotation/branding check.
+    _lastSeenCreds = updated;
+    await ref.read(credentialsProvider.notifier).save(updated);
+  }
+
   Future<void> _maybeRefreshBranding() async {
+    // One retry: this runs automatically right after login (often right on
+    // the heels of the API-key provisioning login), so a single transient
+    // failure there would otherwise leave the user stuck with the default
+    // theme until they found the manual "Re-detect from ITFlow" button.
+    final ok = await _tryRefreshBranding();
+    if (!ok) {
+      await Future.delayed(const Duration(seconds: 3));
+      await _tryRefreshBranding();
+    }
+  }
+
+  /// Returns true if the branding fetch completed without throwing (not
+  /// whether it actually found an accent/name — an instance with no
+  /// detectable accent class still "succeeds").
+  Future<bool> _tryRefreshBranding() async {
     final settings = ref.read(appSettingsProvider).value;
-    if (settings == null) return;
+    if (settings == null) return false;
     final creds = ref.read(credentialsProvider).value;
-    if (creds == null) return;
+    if (creds == null) return false;
     // Use the configured web client if web creds are set; otherwise build a
     // throwaway one with empty creds so we can still scrape the public
     // login.php (company name lives there and the agent-page lookup that
@@ -62,7 +103,10 @@ class _FerruleAppState extends ConsumerState<FerruleApp> {
             .read(appSettingsProvider.notifier)
             .setCachedInstanceName(b.name!);
       }
-    } catch (_) {/* non-fatal */}
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   @override

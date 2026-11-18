@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/widgets.dart';
 import 'ticket_model.dart';
 import 'ticket_repository.dart';
+import '../onboarding/tips.dart';
 
 class TicketsScreen extends ConsumerStatefulWidget {
   const TicketsScreen({super.key});
@@ -40,6 +41,11 @@ class _TicketsScreenState extends ConsumerState<TicketsScreen> {
       ),
       body: Column(
         children: [
+          const FirstVisitTip(
+            id: 'tickets.list',
+            text:
+                'Search by subject, number or client, and switch between open and resolved below. Tap + to raise a ticket for a client.',
+          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: TextField(

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+import 'package:html/dom.dart' show Element;
 import 'package:html/parser.dart' as html_parser;
 
 import '../../features/expenses/expense_form_data.dart';
@@ -38,8 +39,9 @@ class ItflowWebClient {
     _dio.interceptors.add(CookieManager(_cookies));
   }
 
-  String get _root =>
-      baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+  String get _root => baseUrl.endsWith('/')
+      ? baseUrl.substring(0, baseUrl.length - 1)
+      : baseUrl;
 
   Future<void> _ensureLoggedIn() async {
     if (_loggedIn) return;
@@ -67,20 +69,24 @@ class ItflowWebClient {
     // ITFlow redirects (302) away from login.php on success.
     final redirectedAway =
         loc != null && !loc.toLowerCase().contains('login.php');
-    final mfaRequired = body.toLowerCase().contains('mfa') ||
+    final mfaRequired =
+        body.toLowerCase().contains('mfa') ||
         body.toLowerCase().contains('two-factor');
-    final lockedOut = resp.statusCode == 429 ||
+    final lockedOut =
+        resp.statusCode == 429 ||
         body.contains('Too Many Requests') ||
         body.contains('blocked due to repeated');
 
     if (lockedOut) {
       throw ApiException(
-          'IP temporarily blocked by ITFlow (too many failed logins). Wait ~10 min.',
-          statusCode: 429);
+        'IP temporarily blocked by ITFlow (too many failed logins). Wait ~10 min.',
+        statusCode: 429,
+      );
     }
     if (mfaRequired && !redirectedAway) {
       throw ApiException(
-          '2FA is enabled on this account. Web automation requires 2FA disabled (or a future TOTP prompt).');
+        '2FA is enabled on this account. Web automation requires 2FA disabled (or a future TOTP prompt).',
+      );
     }
     if (!redirectedAway) {
       throw ApiException('Login failed — check email and password.');
@@ -130,8 +136,9 @@ class ItflowWebClient {
       }
     }
     throw ApiException(
-        'Could not extract CSRF token from agent UI. First response body started with: '
-        '${sampleBody ?? "(empty)"}');
+      'Could not extract CSRF token from agent UI. First response body started with: '
+      '${sampleBody ?? "(empty)"}',
+    );
   }
 
   String? _extractCsrf(String body) {
@@ -193,7 +200,9 @@ class ItflowWebClient {
       if (r.statusCode != null && r.statusCode! < 300) {
         name = _cleanTitle(_extractTitle(r.data?.toString() ?? ''));
       }
-    } catch (_) {/* fall through to agent pages */}
+    } catch (_) {
+      /* fall through to agent pages */
+    }
 
     // 2. Agent pages: authenticated, but the only place the body carries
     //    `accent-<name>`. Also a fallback for the name if login.php was
@@ -203,7 +212,7 @@ class ItflowWebClient {
       for (final path in const [
         '/agent/home.php',
         '/agent/dashboard.php',
-        '/index.php'
+        '/index.php',
       ]) {
         if (accent != null && name != null) break;
         try {
@@ -221,16 +230,39 @@ class ItflowWebClient {
           if (r.statusCode == null || r.statusCode! >= 300) continue;
           final body = r.data?.toString() ?? '';
           if (body.isEmpty) continue;
-          accent ??= RegExp(r'\baccent-([a-z][a-z0-9-]*)\b')
-              .firstMatch(body)
-              ?.group(1)
-              ?.toLowerCase();
+          accent ??= _extractAccent(body);
           name ??= _cleanTitle(_extractTitle(body));
-        } catch (_) {/* try next */}
+        } catch (_) {
+          /* try next */
+        }
       }
-    } catch (_) {/* keep whatever we got from login.php */}
+    } catch (_) {
+      /* keep whatever we got from login.php */
+    }
 
     return (accent: accent, name: name);
+  }
+
+  /// AdminLTE 3 builds put `accent-<name>` on the body; AdminLTE 4 builds
+  /// use `data-lte-primary="<name>"` and a `theme-<name>` body class.
+  String? _extractAccent(String body) {
+    final bodyTag =
+        RegExp(
+          r'<body[^>]*>',
+          caseSensitive: false,
+        ).firstMatch(body)?.group(0) ??
+        '';
+    for (final re in [
+      RegExp(r'''data-lte-primary=["']([a-z][a-z0-9-]*)["']'''),
+      RegExp(r'\btheme-([a-z][a-z0-9-]*)\b'),
+      RegExp(r'\baccent-([a-z][a-z0-9-]*)\b'),
+    ]) {
+      final m = re.firstMatch(bodyTag);
+      if (m != null) return m.group(1)!.toLowerCase();
+    }
+    return RegExp(
+      r'\baccent-([a-z][a-z0-9-]*)\b',
+    ).firstMatch(body)?.group(1)?.toLowerCase();
   }
 
   String? _extractTitle(String body) {
@@ -268,88 +300,143 @@ class ItflowWebClient {
 
   /// Scrapes the ticket page for the replies/comments thread.
   /// Replies are returned newest-first (matching the web UI's ORDER BY DESC).
-  Future<List<TicketReply>> fetchTicketReplies(int ticketId) async {
+  Future<List<TicketReply>> fetchTicketReplies(int ticketId) async =>
+      _parseReplies(await _getTicketPage(ticketId));
+
+  /// Ticket statuses an agent can pick when replying, read from the reply
+  /// form on the ticket page (they're configurable per instance, so they
+  /// can't be hardcoded). `selected` is the ticket's current status.
+  Future<List<({int id, String name, bool selected})>> fetchReplyStatuses(
+    int ticketId,
+  ) async {
+    final doc = html_parser.parse(await _getTicketPage(ticketId));
+    final sel =
+        doc.querySelector('select#ticket_reply_status') ??
+        doc.querySelector('form select[name="status"]');
+    final out = <({int id, String name, bool selected})>[];
+    if (sel == null) return out;
+    for (final opt in sel.querySelectorAll('option')) {
+      final id = int.tryParse(opt.attributes['value'] ?? '');
+      if (id == null || id == 0) continue;
+      out.add((
+        id: id,
+        name: opt.text.trim(),
+        selected: opt.attributes.containsKey('selected'),
+      ));
+    }
+    return out;
+  }
+
+  Future<String> _getTicketPage(int ticketId) async {
     await _ensureLoggedIn();
-    final resp = await _dio.get(
-      '$_root/agent/ticket.php',
-      queryParameters: {'ticket_id': ticketId},
-      options: Options(
-        followRedirects: true,
-        maxRedirects: 5,
-        validateStatus: (s) => s != null && s < 500,
-      ),
-    );
-    final body = resp.data?.toString() ?? '';
-    if (body.contains('name="email"') && body.contains('name="password"')) {
-      _loggedIn = false;
-      await login();
-      // Retry once.
-      final retry = await _dio.get(
+    Future<String> doGet() async {
+      final resp = await _dio.get(
         '$_root/agent/ticket.php',
         queryParameters: {'ticket_id': ticketId},
-        options: Options(followRedirects: true, maxRedirects: 5),
+        options: Options(
+          followRedirects: true,
+          maxRedirects: 5,
+          validateStatus: (s) => s != null && s < 500,
+        ),
       );
-      return _parseReplies(retry.data?.toString() ?? '');
+      return resp.data?.toString() ?? '';
     }
-    return _parseReplies(body);
+
+    final body = await doGet();
+    if (body.contains('name="email"') && body.contains('name="password"')) {
+      _loggedIn = false;
+      _csrfToken = null;
+      await login();
+      return doGet();
+    }
+    return body;
   }
 
   List<TicketReply> _parseReplies(String body) {
     if (body.isEmpty) return const [];
     final doc = html_parser.parse(body);
-    final cards = doc.querySelectorAll('div.card.border-left');
+    // AdminLTE 3 builds: `card border-left border-<type>`; AdminLTE 4
+    // builds: `card ticket-reply border-start border-<type>` plus a
+    // data-reply-group attribute.
+    final cards = doc.querySelectorAll(
+      'div.card.border-left, div.card.ticket-reply, div.card[data-reply-group]',
+    );
     final out = <TicketReply>[];
     var pseudoId = 0;
     for (final card in cards) {
       final classes = (card.attributes['class'] ?? '').toLowerCase();
+      final group = (card.attributes['data-reply-group'] ?? '').toLowerCase();
       ReplyType type;
-      if (classes.contains('border-dark')) {
+      if (group == 'internal' || classes.contains('border-dark')) {
         type = ReplyType.internal;
-      } else if (classes.contains('border-warning')) {
+      } else if (group == 'client' || classes.contains('border-warning')) {
         type = ReplyType.client;
-      } else if (classes.contains('border-info')) {
+      } else if (group == 'public' || classes.contains('border-info')) {
         type = ReplyType.public;
       } else {
         // Not a reply card we recognise (could be unrelated bordered card).
         continue;
       }
 
-      final authorEl = card.querySelector('h3.card-title');
+      final header = card.querySelector('.card-header') ?? card;
+      final authorEl =
+          card.querySelector('h3.card-title') ?? header.querySelector('strong');
       final authorName = authorEl?.text.trim() ?? '';
       if (authorName.isEmpty) continue;
 
-      // Try to recover the reply DB id from any archive/edit link inside the card.
+      // Reply DB id: the card's own id="reply-N", else any archive/edit link.
       int id = ++pseudoId;
-      for (final a in card.querySelectorAll('a')) {
-        final href = a.attributes['href'] ?? '';
-        final dataModalUrl = a.attributes['data-modal-url'] ?? '';
-        final match = RegExp(
-          r'(?:archive_ticket_reply=|id=)(\d+)',
-        ).firstMatch('$href $dataModalUrl');
-        if (match != null) {
-          id = int.tryParse(match.group(1)!) ?? id;
-          break;
+      final idAttr = RegExp(
+        r'^reply-(\d+)$',
+      ).firstMatch(card.attributes['id'] ?? '');
+      if (idAttr != null) {
+        id = int.parse(idAttr.group(1)!);
+      } else {
+        for (final a in card.querySelectorAll('a')) {
+          final href = a.attributes['href'] ?? '';
+          final dataModalUrl = a.attributes['data-modal-url'] ?? '';
+          final match = RegExp(
+            r'(?:archive_ticket_reply=|id=)(\d+)',
+          ).firstMatch('$href $dataModalUrl');
+          if (match != null) {
+            id = int.tryParse(match.group(1)!) ?? id;
+            break;
+          }
         }
       }
 
-      // Time worked
+      final timeRe = RegExp(
+        r'(\d+\s*(?:s|m|h|d)\b(?:\s*\d+\s*(?:s|m|h)\b)*|\d{1,2}:\d{2}(?::\d{2})?)',
+      );
       String? timeWorked;
-      for (final small in card.querySelectorAll('small')) {
-        final txt = small.text;
-        if (txt.contains('Time worked')) {
-          final m = RegExp(r'(\d+\s*(?:s|m|h|d)|\d{1,2}:\d{2}(?::\d{2})?)')
-              .firstMatch(small.text);
-          if (m != null) timeWorked = m.group(1);
-        }
-      }
-
-      // Created ago + raw timestamp
       String? createdAgo;
       String? createdAtRaw;
-      final timestampDiv = card.querySelector('small.text-muted div[title]');
-      if (timestampDiv != null) {
-        createdAtRaw = timestampDiv.attributes['title'];
-        createdAgo = timestampDiv.text.trim();
+      // AdminLTE 4: <div class="small text-muted" title="Created: …">
+      //   12 seconds ago · <i class="fa-clock"></i> 1m </div>
+      final created = header.querySelector('[title^="Created"]');
+      if (created != null) {
+        createdAtRaw = created.attributes['title']!.replaceFirst(
+          RegExp(r'^Created:\s*'),
+          '',
+        );
+        final text = created.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+        createdAgo = text.split('·').first.trim();
+        if (created.querySelector('.fa-clock') != null && text.contains('·')) {
+          final m = timeRe.firstMatch(text.substring(text.indexOf('·') + 1));
+          if (m != null) timeWorked = m.group(1)!.trim();
+        }
+      } else {
+        for (final small in card.querySelectorAll('small')) {
+          if (small.text.contains('Time worked')) {
+            final m = timeRe.firstMatch(small.text);
+            if (m != null) timeWorked = m.group(1);
+          }
+        }
+        final timestampDiv = card.querySelector('small.text-muted div[title]');
+        if (timestampDiv != null) {
+          createdAtRaw = timestampDiv.attributes['title'];
+          createdAgo = timestampDiv.text.trim();
+        }
       }
 
       // Initials fallback
@@ -367,16 +454,18 @@ class ItflowWebClient {
       final bodyEl = card.querySelector('div.card-body');
       final bodyHtml = bodyEl?.innerHtml ?? '';
 
-      out.add(TicketReply(
-        id: id,
-        authorName: authorName,
-        authorInitials: initials.toUpperCase(),
-        type: type,
-        bodyHtml: bodyHtml,
-        timeWorked: timeWorked,
-        createdAgo: createdAgo,
-        createdAtRaw: createdAtRaw,
-      ));
+      out.add(
+        TicketReply(
+          id: id,
+          authorName: authorName,
+          authorInitials: initials.toUpperCase(),
+          type: type,
+          bodyHtml: bodyHtml,
+          timeWorked: timeWorked,
+          createdAgo: createdAgo,
+          createdAtRaw: createdAtRaw,
+        ),
+      );
     }
     return out;
   }
@@ -450,21 +539,158 @@ class ItflowWebClient {
     );
   }
 
+  /// ITFlow answers a refused form the same way as a saved one: a 302 back
+  /// with a flash message in the session. Follow the redirect once and throw
+  /// the message if it was an error toast (AdminLTE 4: `text-bg-danger`;
+  /// older builds: `toastr["error"]("...")`).
+  Future<void> _raiseOnFlashError(Response resp) async {
+    final loc = resp.headers.value('location');
+    if (loc == null || loc.isEmpty) return;
+    final target = Uri.parse('$_root/agent/').resolve(loc).toString();
+    String body;
+    try {
+      final r = await _dio.get(
+        target,
+        options: Options(
+          followRedirects: true,
+          maxRedirects: 5,
+          validateStatus: (s) => s != null && s < 500,
+        ),
+      );
+      body = r.data?.toString() ?? '';
+    } catch (_) {
+      return; // can't tell; the post itself went through
+    }
+    final msg = flashErrorFrom(body);
+    if (msg != null) throw ApiException(msg);
+  }
+
+  /// The error text of an ITFlow flash message in [body], or null if there
+  /// is none or it isn't an error.
+  static String? flashErrorFrom(String body) {
+    String clean(String h) => h
+        .replaceAll(RegExp(r'<[^>]+>'), '')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&#039;', "'")
+        .replaceAll('&quot;', '"')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    final toast = html_parser.parse(body).querySelector('#itflowFlashToast');
+    if (toast != null) {
+      final cls = toast.attributes['class'] ?? '';
+      if (cls.contains('text-bg-danger')) {
+        return clean(toast.querySelector('.toast-body')?.innerHtml ?? '');
+      }
+      return null;
+    }
+    final m = RegExp(r'toastr\["(error|danger)"\]\("((?:[^"\\]|\\.)*)"\)')
+        .firstMatch(body);
+    return m == null ? null : clean(m.group(2)!);
+  }
+
+  /// GETs an agent page as HTML, signing in again once if the session
+  /// lapsed. [path] is relative to the instance root (e.g.
+  /// `agent/client_overview.php`).
+  Future<String> fetchAgentHtml(String path,
+      {Map<String, dynamic>? query}) async {
+    await _ensureLoggedIn();
+    Future<String> doGet() async {
+      final r = await _dio.get(
+        '$_root/$path',
+        queryParameters: query,
+        options: Options(
+          followRedirects: true,
+          maxRedirects: 5,
+          validateStatus: (s) => s != null && s < 500,
+        ),
+      );
+      return r.data?.toString() ?? '';
+    }
+
+    var body = await doGet();
+    if (body.contains('name="email"') &&
+        body.contains('name="password"') &&
+        body.toLowerCase().contains('login')) {
+      _loggedIn = false;
+      _csrfToken = null;
+      await login();
+      body = await doGet();
+    }
+    return body;
+  }
+
+  /// Loads an ajax modal's HTML (see [_getModalHtml]).
+  Future<String> fetchModalHtml(String path, {Map<String, dynamic>? query}) =>
+      _getModalHtml(path, query: query);
+
+  /// Posts [fields] (plus the session's CSRF token) to agent/post.php and
+  /// throws the server's flash message if it refused.
+  Future<void> postAgentForm(Map<String, dynamic> fields,
+      {String? referer}) async {
+    final csrf = await _getCsrf();
+    await _postAgent(
+      form: FormData.fromMap({...fields, 'csrf_token': csrf}),
+      referer: referer ?? '$_root/agent/clients.php',
+    );
+  }
+
+  /// Runs one of agent/post.php's GET actions (archive, delete, ...) with
+  /// the session's CSRF token, throwing the flash message if it refused.
+  ///
+  /// [checkFlash] false for actions ITFlow reports in a red toast even when
+  /// they worked (archiving and deleting).
+  Future<void> agentGetAction(Map<String, dynamic> query,
+      {String? referer, bool checkFlash = true}) async {
+    final csrf = await _getCsrf();
+    final resp = await _dio.get(
+      '$_root/agent/post.php',
+      queryParameters: {...query, 'csrf_token': csrf},
+      options: Options(
+        headers: {'Referer': referer ?? '$_root/agent/clients.php'},
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
+    if (resp.statusCode != null && resp.statusCode! >= 400) {
+      throw ApiException('Request failed: HTTP ${resp.statusCode}',
+          statusCode: resp.statusCode);
+    }
+    if (checkFlash) await _raiseOnFlashError(resp);
+  }
+
+  /// Posts to agent/post.php for a handler that answers with no page at all
+  /// (e.g. hiding a banner answers 204).
+  Future<void> postAgentQuiet(Map<String, dynamic> fields) async {
+    final csrf = await _getCsrf();
+    final resp = await _dio.post(
+      '$_root/agent/post.php',
+      data: FormData.fromMap({...fields, 'csrf_token': csrf}),
+      options: Options(
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
+    if (resp.statusCode != null && resp.statusCode! >= 400) {
+      throw ApiException('Request failed: HTTP ${resp.statusCode}',
+          statusCode: resp.statusCode);
+    }
+  }
+
   /// Posts to /agent/post.php with a single retry if the session has lapsed.
   Future<void> _postAgent({
     required FormData form,
     required String referer,
   }) async {
     Future<Response> doPost(FormData f) => _dio.post(
-          '$_root/agent/post.php',
-          data: f,
-          options: Options(
-            headers: {'Referer': referer},
-            contentType: Headers.formUrlEncodedContentType,
-            followRedirects: false,
-            validateStatus: (s) => s != null && s < 500,
-          ),
-        );
+      '$_root/agent/post.php',
+      data: f,
+      options: Options(
+        headers: {'Referer': referer},
+        contentType: Headers.formUrlEncodedContentType,
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
     var resp = await doPost(form);
     final loc = resp.headers.value('location');
     if (loc != null && loc.toLowerCase().contains('login.php')) {
@@ -475,17 +701,22 @@ class ItflowWebClient {
       // FormData is single-use; rebuild from the original fields.
       final retry = FormData();
       for (final field in form.fields) {
-        retry.fields.add(MapEntry(
-          field.key == 'csrf_token' ? 'csrf_token' : field.key,
-          field.key == 'csrf_token' ? csrf : field.value,
-        ));
+        retry.fields.add(
+          MapEntry(
+            field.key == 'csrf_token' ? 'csrf_token' : field.key,
+            field.key == 'csrf_token' ? csrf : field.value,
+          ),
+        );
       }
       resp = await doPost(retry);
     }
     if (resp.statusCode != null && resp.statusCode! >= 400) {
-      throw ApiException('Request failed: HTTP ${resp.statusCode}',
-          statusCode: resp.statusCode);
+      throw ApiException(
+        'Request failed: HTTP ${resp.statusCode}',
+        statusCode: resp.statusCode,
+      );
     }
+    await _raiseOnFlashError(resp);
   }
 
   /// Hits the web UI's AI reword endpoint (`/agent/ajax.php?ai_reword`).
@@ -496,20 +727,20 @@ class ItflowWebClient {
   Future<String> rewordText(String text) async {
     await _ensureLoggedIn();
     Future<Response> doPost() => _dio.post(
-          '$_root/agent/ajax.php',
-          queryParameters: {'ai_reword': ''},
-          data: {'text': text},
-          options: Options(
-            headers: {
-              'Referer': '$_root/agent/home.php',
-              'X-Requested-With': 'XMLHttpRequest',
-            },
-            contentType: 'application/json',
-            responseType: ResponseType.json,
-            followRedirects: false,
-            validateStatus: (s) => s != null && s < 500,
-          ),
-        );
+      '$_root/agent/ajax.php',
+      queryParameters: {'ai_reword': ''},
+      data: {'text': text},
+      options: Options(
+        headers: {
+          'Referer': '$_root/agent/home.php',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        contentType: 'application/json',
+        responseType: ResponseType.json,
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
     var resp = await doPost();
     final loc = resp.headers.value('location');
     if (loc != null && loc.toLowerCase().contains('login.php')) {
@@ -519,17 +750,24 @@ class ItflowWebClient {
       resp = await doPost();
     }
     if (resp.statusCode != null && resp.statusCode! >= 400) {
-      throw ApiException('AI reword failed: HTTP ${resp.statusCode}',
-          statusCode: resp.statusCode);
+      throw ApiException(
+        'AI reword failed: HTTP ${resp.statusCode}',
+        statusCode: resp.statusCode,
+      );
     }
     final data = resp.data;
     String? out;
+    if (data is Map && data['error'] is String) {
+      // e.g. "No AI model is set up for General. Add one in Admin > AI Providers."
+      throw ApiException('AI reword unavailable: ${data['error']}');
+    }
     if (data is Map) {
       out = data['rewordedText']?.toString();
     } else if (data is String) {
       // Some servers return JSON-as-string; try a loose grab.
-      final m = RegExp(r'"rewordedText"\s*:\s*"((?:[^"\\]|\\.)*)"')
-          .firstMatch(data);
+      final m = RegExp(
+        r'"rewordedText"\s*:\s*"((?:[^"\\]|\\.)*)"',
+      ).firstMatch(data);
       if (m != null) {
         out = m
             .group(1)!
@@ -543,14 +781,22 @@ class ItflowWebClient {
     }
     if (out.trim() == 'Failed to get a response from the AI API.') {
       throw ApiException(
-          'AI reword unavailable — ITFlow admin needs to configure a General-purpose AI model.');
+        'AI reword unavailable — ITFlow admin needs to configure a General-purpose AI model.',
+      );
     }
     return out;
   }
 
+  /// ITFlow's reply form: 0=Internal, 1=Public note, 2=Public + email and,
+  /// on newer builds, 3=Public + text message. Older app builds used 3 for
+  /// Internal (old servers treated anything unknown as Internal), so 3 is
+  /// mapped back to 0 here and never sent.
+  static int _webReplyType(int t) => (t == 1 || t == 2) ? t : 0;
+
   /// Submits a reply (and optional time worked) to the given ticket.
-  /// [statusId]: ITFlow ticket status id (1=New, 2=Open, 3=In Progress, 4=Closed, etc.).
-  /// [replyType]: 1=Public no email, 2=Public + email, 3=Internal.
+  /// [statusId]: ITFlow ticket status id; read the instance's own list with
+  /// [fetchReplyStatuses].
+  /// [replyType]: 0=Internal, 1=Public no email, 2=Public + email.
   Future<void> addTicketReply({
     required int ticketId,
     required int clientId,
@@ -572,13 +818,13 @@ class ItflowWebClient {
       'hours': hours,
       'minutes': minutes,
       'seconds': seconds,
-      'public_reply_type': replyType,
+      'public_reply_type': _webReplyType(replyType),
     });
     final resp = await _dio.post(
       '$_root/agent/post.php',
       data: form,
       options: Options(
-        headers: {'Referer': '$_root/ticket.php?ticket_id=$ticketId'},
+        headers: {'Referer': '$_root/agent/ticket.php?ticket_id=$ticketId'},
         contentType: Headers.formUrlEncodedContentType,
       ),
     );
@@ -600,79 +846,97 @@ class ItflowWebClient {
         'hours': hours,
         'minutes': minutes,
         'seconds': seconds,
-        'public_reply_type': replyType,
+        'public_reply_type': _webReplyType(replyType),
       });
       final retryResp = await _dio.post(
         '$_root/agent/post.php',
         data: retry,
         options: Options(
-          headers: {'Referer': '$_root/ticket.php?ticket_id=$ticketId'},
+          headers: {'Referer': '$_root/agent/ticket.php?ticket_id=$ticketId'},
           contentType: Headers.formUrlEncodedContentType,
         ),
       );
       if (retryResp.statusCode != null && retryResp.statusCode! >= 400) {
-        throw ApiException('Reply failed: HTTP ${retryResp.statusCode}',
-            statusCode: retryResp.statusCode);
+        throw ApiException(
+          'Reply failed: HTTP ${retryResp.statusCode}',
+          statusCode: retryResp.statusCode,
+        );
       }
+      await _raiseOnFlashError(retryResp);
       return;
     }
 
     if (resp.statusCode != null && resp.statusCode! >= 400) {
-      throw ApiException('Reply failed: HTTP ${resp.statusCode}',
-          statusCode: resp.statusCode);
+      throw ApiException(
+        'Reply failed: HTTP ${resp.statusCode}',
+        statusCode: resp.statusCode,
+      );
     }
-    // ITFlow's response is typically a 302 redirect to the ticket page on success.
+    // A 302 back to the ticket page, with a flash saying how it went.
+    await _raiseOnFlashError(resp);
+  }
+
+  /// Loads one of ITFlow's ajax modals and returns its HTML. The endpoint
+  /// answers `{"content": "<html>"}`, or `{"error": "..."}` when it refuses
+  /// (e.g. paying an invoice that has nothing owed), which is thrown as an
+  /// [ApiException] carrying the server's own words.
+  Future<String> _getModalHtml(
+    String path, {
+    Map<String, dynamic>? query,
+  }) async {
+    await _ensureLoggedIn();
+    Future<Response> doGet() => _dio.get(
+      '$_root/$path',
+      queryParameters: query,
+      options: Options(
+        followRedirects: true,
+        maxRedirects: 5,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
+    var raw = (await doGet()).data;
+    var bodyStr = raw is String ? raw : (raw?.toString() ?? '');
+    if (raw is! Map &&
+        bodyStr.contains('name="email"') &&
+        bodyStr.contains('name="password"')) {
+      _loggedIn = false;
+      _csrfToken = null;
+      await _ensureLoggedIn();
+      raw = (await doGet()).data;
+      bodyStr = raw is String ? raw : (raw?.toString() ?? '');
+    }
+    Object? decoded = raw;
+    if (raw is! Map) {
+      try {
+        decoded = jsonDecode(bodyStr);
+      } catch (_) {
+        decoded = null;
+      }
+    }
+    if (decoded is Map) {
+      final err = decoded['error'];
+      if (err is String && err.isNotEmpty) {
+        throw ApiException(err.replaceAll(RegExp(r'<[^>]+>'), '').trim());
+      }
+      if (decoded['content'] is String) return decoded['content'] as String;
+    }
+    return bodyStr;
   }
 
   /// Fetches the "New Expense" modal HTML and parses out CSRF token + the
   /// account/vendor/category/client option lists ITFlow shows on the web form.
   /// The modal endpoint returns `{"content": "...html..."}` JSON.
   Future<ExpenseAddFormData> fetchExpenseAddForm() async {
-    await _ensureLoggedIn();
-    Future<Response> doGet() => _dio.get(
-          '$_root/agent/modals/expense/expense_add.php',
-          options: Options(
-            followRedirects: true,
-            maxRedirects: 5,
-            validateStatus: (s) => s != null && s < 500,
-          ),
-        );
-    var resp = await doGet();
-    var raw = resp.data;
-    // Session lapsed — body will be the login page HTML, not JSON.
-    final bodyStr = raw is String ? raw : (raw?.toString() ?? '');
-    if (bodyStr.contains('name="email"') && bodyStr.contains('name="password"')) {
-      _loggedIn = false;
-      _csrfToken = null;
-      await _ensureLoggedIn();
-      resp = await doGet();
-      raw = resp.data;
-    }
-
-    String htmlContent;
-    if (raw is Map && raw['content'] is String) {
-      htmlContent = raw['content'] as String;
-    } else {
-      final s = raw is String ? raw : (raw?.toString() ?? '');
-      // Some responses come through as a JSON string when dio doesn't parse.
-      try {
-        final decoded = jsonDecode(s);
-        if (decoded is Map && decoded['content'] is String) {
-          htmlContent = decoded['content'] as String;
-        } else {
-          htmlContent = s;
-        }
-      } catch (_) {
-        htmlContent = s;
-      }
-    }
-
-    final doc = html_parser.parse(htmlContent);
-    final csrf =
-        doc.querySelector('input[name="csrf_token"]')?.attributes['value'];
+    final doc = html_parser.parse(
+      await _getModalHtml('agent/modals/expense/expense_add.php'),
+    );
+    final csrf = doc
+        .querySelector('input[name="csrf_token"]')
+        ?.attributes['value'];
     if (csrf == null || csrf.isEmpty) {
       throw ApiException(
-          'Could not load expense form — missing CSRF token. Are web credentials correct?');
+        'Could not load expense form — missing CSRF token. Are web credentials correct?',
+      );
     }
 
     List<NamedOption> parseOptions(String name, {bool stripBalance = false}) {
@@ -752,30 +1016,36 @@ class ItflowWebClient {
       });
       if (receiptFileName != null && receiptFileName.isNotEmpty) {
         if (receiptBytes != null) {
-          form.files.add(MapEntry(
-            'file',
-            MultipartFile.fromBytes(receiptBytes, filename: receiptFileName),
-          ));
+          form.files.add(
+            MapEntry(
+              'file',
+              MultipartFile.fromBytes(receiptBytes, filename: receiptFileName),
+            ),
+          );
         } else if (receiptFilePath != null && receiptFilePath.isNotEmpty) {
-          form.files.add(MapEntry(
-            'file',
-            MultipartFile.fromFileSync(receiptFilePath,
-                filename: receiptFileName),
-          ));
+          form.files.add(
+            MapEntry(
+              'file',
+              MultipartFile.fromFileSync(
+                receiptFilePath,
+                filename: receiptFileName,
+              ),
+            ),
+          );
         }
       }
       return form;
     }
 
     Future<Response> doPost() => _dio.post(
-          '$_root/agent/post.php',
-          data: buildForm(),
-          options: Options(
-            headers: {'Referer': '$_root/agent/expenses.php'},
-            followRedirects: false,
-            validateStatus: (s) => s != null && s < 500,
-          ),
-        );
+      '$_root/agent/post.php',
+      data: buildForm(),
+      options: Options(
+        headers: {'Referer': '$_root/agent/expenses.php'},
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
 
     var resp = await doPost();
     final loc = resp.headers.value('location');
@@ -788,8 +1058,10 @@ class ItflowWebClient {
     }
 
     if (resp.statusCode != null && resp.statusCode! >= 400) {
-      throw ApiException('Add expense failed: HTTP ${resp.statusCode}',
-          statusCode: resp.statusCode);
+      throw ApiException(
+        'Add expense failed: HTTP ${resp.statusCode}',
+        statusCode: resp.statusCode,
+      );
     }
 
     // CSRF rejection causes a redirect to index.php with an alert in session.
@@ -798,69 +1070,43 @@ class ItflowWebClient {
     if (finalLoc.toLowerCase().endsWith('/index.php') ||
         finalLoc.toLowerCase().contains('login.php')) {
       throw ApiException(
-          'Server rejected the request — try logging out and back in.');
+        'Server rejected the request — try logging out and back in.',
+      );
     }
+    await _raiseOnFlashError(resp);
   }
 
   /// Fetches the "New Trip" modal HTML and parses out CSRF + driver/client
   /// option lists. The selected driver is the current logged-in user, which is
   /// what ITFlow defaults to on the web form.
   Future<TripAddFormData> fetchTripAddForm() async {
-    await _ensureLoggedIn();
-    Future<Response> doGet() => _dio.get(
-          '$_root/agent/modals/trip/trip_add.php',
-          options: Options(
-            followRedirects: true,
-            maxRedirects: 5,
-            validateStatus: (s) => s != null && s < 500,
-          ),
-        );
-    var resp = await doGet();
-    var raw = resp.data;
-    final bodyStr = raw is String ? raw : (raw?.toString() ?? '');
-    if (bodyStr.contains('name="email"') && bodyStr.contains('name="password"')) {
-      _loggedIn = false;
-      _csrfToken = null;
-      await _ensureLoggedIn();
-      resp = await doGet();
-      raw = resp.data;
-    }
-
-    String htmlContent;
-    if (raw is Map && raw['content'] is String) {
-      htmlContent = raw['content'] as String;
-    } else {
-      final s = raw is String ? raw : (raw?.toString() ?? '');
-      try {
-        final decoded = jsonDecode(s);
-        if (decoded is Map && decoded['content'] is String) {
-          htmlContent = decoded['content'] as String;
-        } else {
-          htmlContent = s;
-        }
-      } catch (_) {
-        htmlContent = s;
-      }
-    }
-
-    final doc = html_parser.parse(htmlContent);
-    final csrf =
-        doc.querySelector('input[name="csrf_token"]')?.attributes['value'];
+    final doc = html_parser.parse(
+      await _getModalHtml('agent/modals/trip/trip_add.php'),
+    );
+    final csrf = doc
+        .querySelector('input[name="csrf_token"]')
+        ?.attributes['value'];
     if (csrf == null || csrf.isEmpty) {
       throw ApiException(
-          'Could not load trip form — missing CSRF token. Are web credentials correct?');
+        'Could not load trip form — missing CSRF token. Are web credentials correct?',
+      );
     }
 
     final drivers = <NamedOption>[];
     int? defaultDriver;
-    final userSel = doc.querySelector('select[name="user"]');
+    // `driver` on current builds, `user` on older ones.
+    final userSel =
+        doc.querySelector('select[name="driver"]') ??
+        doc.querySelector('select[name="user"]');
     if (userSel != null) {
       for (final opt in userSel.querySelectorAll('option')) {
         final value = opt.attributes['value'] ?? '';
         final id = int.tryParse(value);
         if (id == null || id == 0) continue;
-        final label = opt.text.trim();
-        drivers.add(NamedOption(id: id, name: label.isEmpty ? 'User #$id' : label));
+        final label = opt.text.trim().replaceFirst(RegExp(r'\s*\(me\)$'), '');
+        drivers.add(
+          NamedOption(id: id, name: label.isEmpty ? 'User #$id' : label),
+        );
         if (opt.attributes.containsKey('selected')) {
           defaultDriver = id;
         }
@@ -875,7 +1121,9 @@ class ItflowWebClient {
         final id = int.tryParse(value);
         if (id == null || id == 0) continue;
         final label = opt.text.trim();
-        clients.add(NamedOption(id: id, name: label.isEmpty ? 'Client #$id' : label));
+        clients.add(
+          NamedOption(id: id, name: label.isEmpty ? 'Client #$id' : label),
+        );
       }
     }
 
@@ -893,14 +1141,14 @@ class ItflowWebClient {
   Future<List<Trip>> fetchTripList() async {
     await _ensureLoggedIn();
     Future<Response> doGet() => _dio.get(
-          '$_root/agent/trips.php',
-          queryParameters: {'canned_date': 'alltime'},
-          options: Options(
-            followRedirects: true,
-            maxRedirects: 5,
-            validateStatus: (s) => s != null && s < 500,
-          ),
-        );
+      '$_root/agent/trips.php',
+      queryParameters: {'canned_date': 'alltime'},
+      options: Options(
+        followRedirects: true,
+        maxRedirects: 5,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
     var resp = await doGet();
     var body = resp.data?.toString() ?? '';
     if (body.contains('name="email"') && body.contains('name="password"')) {
@@ -915,6 +1163,12 @@ class ItflowWebClient {
     final rows = doc.querySelectorAll('table tbody tr');
     final out = <Trip>[];
     for (final row in rows) {
+      final route = row.querySelector('td.itflow-trip-route');
+      if (route != null) {
+        final t = _parseNewTripRow(row, route);
+        if (t != null) out.add(t);
+        continue;
+      }
       final cells = row.querySelectorAll('td');
       if (cells.length < 6) continue;
 
@@ -934,8 +1188,9 @@ class ItflowWebClient {
       final milesCell = cells[5];
       final roundtrip = milesCell.querySelector('i.fa-sync-alt') != null;
       final milesNum = RegExp(r'[\d.]+').firstMatch(milesCell.text);
-      final miles =
-          milesNum == null ? 0.0 : double.tryParse(milesNum.group(0)!) ?? 0.0;
+      final miles = milesNum == null
+          ? 0.0
+          : double.tryParse(milesNum.group(0)!) ?? 0.0;
 
       // The client column is omitted when the page is filtered by client.
       // Detect by total cell count: 8 cells means client column is present
@@ -947,19 +1202,86 @@ class ItflowWebClient {
         if (raw.isNotEmpty && raw != '-') clientName = raw;
       }
 
-      out.add(Trip(
-        id: id,
-        date: date,
-        driver: driver,
-        purpose: purpose,
-        source: source,
-        destination: destination,
-        miles: miles,
-        roundtrip: roundtrip,
-        clientName: clientName,
-      ));
+      out.add(
+        Trip(
+          id: id,
+          date: date,
+          driver: driver,
+          purpose: purpose,
+          source: source,
+          destination: destination,
+          miles: miles,
+          roundtrip: roundtrip,
+          clientName: clientName,
+        ),
+      );
     }
     return out;
+  }
+
+  /// Current (AdminLTE 4) trips table: checkbox, date (modal link), route
+  /// cell (From → To, purpose under it), client (absent when filtered by
+  /// client), driver badge, miles (round-trip total + sync icon), actions.
+  Trip? _parseNewTripRow(Element row, Element route) {
+    final link = row.querySelector('a[data-modal-url*="trip.php?id="]');
+    final idMatch = RegExp(
+      r'id=(\d+)',
+    ).firstMatch(link?.attributes['data-modal-url'] ?? '');
+    if (idMatch == null) return null;
+    final id = int.parse(idMatch.group(1)!);
+    final date = (link?.text ?? '').trim();
+
+    final routeDiv = route.querySelector('div[title]');
+    final routeTitle = routeDiv?.attributes['title'] ?? '';
+    String source = '', destination = '';
+    final arrow = routeTitle.indexOf('→');
+    if (arrow >= 0) {
+      source = routeTitle.substring(0, arrow).trim();
+      destination = routeTitle.substring(arrow + 1).trim();
+    } else {
+      source = (routeDiv?.querySelector('span')?.text ?? '').trim();
+    }
+    final purposeEl = route.querySelector('div.small');
+    final purpose = (purposeEl?.attributes['title'] ?? purposeEl?.text ?? '')
+        .trim();
+
+    final cells = row.querySelectorAll('td');
+    final routeIdx = cells.indexOf(route);
+    String? clientName;
+    String driver = '';
+    double miles = 0;
+    bool roundtrip = false;
+    for (var i = routeIdx + 1; i < cells.length; i++) {
+      final c = cells[i];
+      if (c.querySelector('.dropdown') != null) continue;
+      final cls = c.attributes['class'] ?? '';
+      if (cls.contains('text-end')) {
+        roundtrip = c.querySelector('i.fa-sync-alt') != null;
+        final m = RegExp(r'[\d.,]+').firstMatch(c.text);
+        miles = double.tryParse(m?.group(0)?.replaceAll(',', '') ?? '') ?? 0;
+      } else if (c.querySelector('.badge') != null) {
+        driver = c.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+        // The badge leads with the initials avatar ("DU Develop User").
+        final initials = c.querySelector('small')?.text ?? '';
+        if (initials.isNotEmpty && driver.startsWith(initials)) {
+          driver = driver.substring(initials.length).trim();
+        }
+      } else {
+        final raw = c.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+        if (raw.isNotEmpty && raw != '-') clientName = raw;
+      }
+    }
+    return Trip(
+      id: id,
+      date: date,
+      driver: driver,
+      purpose: purpose,
+      source: source,
+      destination: destination,
+      miles: miles,
+      roundtrip: roundtrip,
+      clientName: clientName,
+    );
   }
 
   /// Submits the "New Trip" form. [clientId] = 0 means no client. [roundtrip]
@@ -987,22 +1309,27 @@ class ItflowWebClient {
         'source': source,
         'destination': destination,
         'purpose': purpose,
+        // Both spellings: `driver`/`round_trip` on current ITFlow,
+        // `user`/`roundtrip` on older builds. Miles are one way; newer
+        // builds double them for a round trip themselves.
+        'driver': driverId,
         'user': driverId,
         'client_id': clientId,
+        if (roundtrip) 'round_trip': '1',
         if (roundtrip) 'roundtrip': '1',
       });
     }
 
     Future<Response> doPost() => _dio.post(
-          '$_root/agent/post.php',
-          data: build(),
-          options: Options(
-            headers: {'Referer': '$_root/agent/trips.php'},
-            contentType: Headers.formUrlEncodedContentType,
-            followRedirects: false,
-            validateStatus: (s) => s != null && s < 500,
-          ),
-        );
+      '$_root/agent/post.php',
+      data: build(),
+      options: Options(
+        headers: {'Referer': '$_root/agent/trips.php'},
+        contentType: Headers.formUrlEncodedContentType,
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
 
     var resp = await doPost();
     final loc = resp.headers.value('location') ?? '';
@@ -1015,77 +1342,60 @@ class ItflowWebClient {
     }
 
     if (resp.statusCode != null && resp.statusCode! >= 400) {
-      throw ApiException('Add trip failed: HTTP ${resp.statusCode}',
-          statusCode: resp.statusCode);
+      throw ApiException(
+        'Add trip failed: HTTP ${resp.statusCode}',
+        statusCode: resp.statusCode,
+      );
     }
 
     final finalLoc = resp.headers.value('location') ?? '';
     if (finalLoc.toLowerCase().endsWith('/index.php') ||
         finalLoc.toLowerCase().contains('login.php')) {
       throw ApiException(
-          'Server rejected the request — try logging out and back in.');
+        'Server rejected the request — try logging out and back in.',
+      );
     }
+    await _raiseOnFlashError(resp);
   }
 
   /// Loads the "Make Payment" modal for an invoice and parses out everything
   /// the form needs: CSRF token, current balance + currency, accounts and
   /// payment-method dropdowns. Mirrors [fetchExpenseAddForm].
   Future<PaymentAddFormData> fetchInvoicePaymentForm(int invoiceId) async {
-    await _ensureLoggedIn();
-    Future<Response> doGet() => _dio.get(
-          '$_root/agent/modals/payment/payment_add.php',
-          queryParameters: {'id': invoiceId},
-          options: Options(
-            followRedirects: true,
-            maxRedirects: 5,
-            validateStatus: (s) => s != null && s < 500,
-          ),
-        );
-    var resp = await doGet();
-    var raw = resp.data;
-    final bodyStr = raw is String ? raw : (raw?.toString() ?? '');
-    if (bodyStr.contains('name="email"') &&
-        bodyStr.contains('name="password"')) {
-      _loggedIn = false;
-      _csrfToken = null;
-      await _ensureLoggedIn();
-      resp = await doGet();
-      raw = resp.data;
-    }
-
-    String htmlContent;
-    if (raw is Map && raw['content'] is String) {
-      htmlContent = raw['content'] as String;
-    } else {
-      final s = raw is String ? raw : (raw?.toString() ?? '');
-      try {
-        final decoded = jsonDecode(s);
-        if (decoded is Map && decoded['content'] is String) {
-          htmlContent = decoded['content'] as String;
-        } else {
-          htmlContent = s;
-        }
-      } catch (_) {
-        htmlContent = s;
-      }
-    }
-
-    final doc = html_parser.parse(htmlContent);
-    final csrf =
-        doc.querySelector('input[name="csrf_token"]')?.attributes['value'];
+    final doc = html_parser.parse(
+      await _getModalHtml(
+        'agent/modals/payment/payment_add.php',
+        query: {'id': invoiceId},
+      ),
+    );
+    final csrf = doc
+        .querySelector('input[name="csrf_token"]')
+        ?.attributes['value'];
     if (csrf == null || csrf.isEmpty) {
-      throw ApiException(
-          'Could not load payment form — missing CSRF token.');
+      throw ApiException('Could not load payment form — missing CSRF token.');
     }
 
     String hidden(String name) =>
         doc.querySelector('input[name="$name"]')?.attributes['value'] ?? '';
-    final balance = double.tryParse(hidden('balance')) ?? 0.0;
+    // Older builds carry a hidden `balance`; newer ones prefill `amount`
+    // with what is owed.
+    final amountInput = doc
+        .querySelector('input[name="amount"]')
+        ?.attributes['value']
+        ?.replaceAll(',', '');
+    final balance =
+        double.tryParse(hidden('balance')) ??
+        double.tryParse(amountInput ?? '') ??
+        0.0;
     final currency = hidden('currency_code');
 
     // Invoice label is rendered in the modal title: "<prefix><number>: Make Payment"
     final title = doc.querySelector('.modal-title')?.text.trim() ?? '';
-    final labelMatch = RegExp(r'^(.+?):\s*Make Payment').firstMatch(title);
+    // "INV-1: Make Payment" on older builds, "Add Payment INV-1 · Client"
+    // on newer ones.
+    final labelMatch =
+        RegExp(r'^(.+?):\s*Make Payment').firstMatch(title) ??
+        RegExp(r'Add Payment\s+(\S+)').firstMatch(title);
     final invoiceLabel = labelMatch?.group(1)?.trim() ?? 'Invoice #$invoiceId';
 
     final accounts = <NamedOption>[];
@@ -1115,7 +1425,8 @@ class ItflowWebClient {
         // has value="".
         final value = opt.attributes['value'];
         final text = opt.text.trim();
-        if (text.isEmpty || (value != null && value.isEmpty && text.startsWith('-'))) {
+        if (text.isEmpty ||
+            (value != null && value.isEmpty && text.startsWith('-'))) {
           continue;
         }
         methods.add(text);
@@ -1171,14 +1482,17 @@ class ItflowWebClient {
     }
 
     Future<Response> doPost() => _dio.post(
-          '$_root/agent/post.php',
-          data: build(),
-          options: Options(
-            contentType: Headers.formUrlEncodedContentType,
-            followRedirects: false,
-            validateStatus: (s) => s != null && s < 500,
-          ),
-        );
+      '$_root/agent/post.php',
+      data: build(),
+      options: Options(
+        headers: {
+          'Referer': '$_root/agent/invoice.php?invoice_id=$invoiceId',
+        },
+        contentType: Headers.formUrlEncodedContentType,
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
 
     var resp = await doPost();
     if (resp.statusCode == 302) {
@@ -1194,19 +1508,258 @@ class ItflowWebClient {
 
     if (resp.statusCode == null ||
         (resp.statusCode! >= 300 && resp.statusCode != 302)) {
-      throw ApiException('Payment submission failed (status ${resp.statusCode}).',
-          statusCode: resp.statusCode);
+      throw ApiException(
+        'Payment submission failed (status ${resp.statusCode}).',
+        statusCode: resp.statusCode,
+      );
     }
 
     final loc = resp.headers.value('location') ?? '';
     if (loc.toLowerCase().endsWith('/index.php') ||
         loc.toLowerCase().contains('login.php')) {
       throw ApiException(
-          'Server rejected the payment — try logging out and back in.');
+        'Server rejected the payment — try logging out and back in.',
+      );
     }
     // ITFlow validates `amount > balance` on the server and flashes an error
-    // back via session — there's no machine-readable response. The redirect
-    // alone is treated as success here.
+    // back via session; surface it.
+    await _raiseOnFlashError(resp);
+  }
+
+  /// Finds the current session's ITFlow user id by searching
+  /// `admin/users.php` for [email] (the row's "UserID: N" title attribute is
+  /// always rendered, unlike the avatar image which only appears once a user
+  /// has uploaded one — there's no dedicated "who am I" endpoint). This also
+  /// doubles as the admin-access check the whole provisioning flow needs:
+  /// `admin/*` pages call `enforceAdminPermission()`, which bails out with
+  /// "Your role does not have admin access." mid-page for anyone else, so a
+  /// non-admin account gets a clear [ApiException] here instead of the
+  /// silent no-op it'd hit trying to POST `add_api_key` later.
+  Future<int> fetchCurrentUserId() async {
+    await _ensureLoggedIn();
+    final resp = await _dio.get(
+      '$_root/admin/users.php',
+      queryParameters: {'q': email},
+      options: Options(
+        followRedirects: true,
+        maxRedirects: 5,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
+    final body = resp.data?.toString() ?? '';
+    if (body.contains('does not have admin access')) {
+      throw ApiException(
+        'This ITFlow account isn\'t an admin, so it can\'t create API keys. '
+        'Ask your admin for a key, or paste one in manually below.',
+      );
+    }
+    final doc = html_parser.parse(body);
+    final want = email.toLowerCase();
+    for (final row in doc.querySelectorAll('table tbody tr')) {
+      // Older builds put the email in a mailto link; newer ones (AdminLTE 4)
+      // render it as plain text with a copy button carrying it.
+      final emails = <String>{
+        for (final a in row.querySelectorAll('a[href^="mailto:"]'))
+          a.text.trim().toLowerCase(),
+        for (final c in row.querySelectorAll('[data-clipboard-text]'))
+          (c.attributes['data-clipboard-text'] ?? '').trim().toLowerCase(),
+      };
+      if (!emails.contains(want)) continue;
+      final title =
+          row.querySelector('a[title^="UserID:"]')?.attributes['title'] ?? '';
+      final m = RegExp(r'UserID:\s*(\d+)').firstMatch(title);
+      if (m != null) return int.parse(m.group(1)!);
+      for (final a in row.querySelectorAll('[data-modal-url]')) {
+        final m2 = RegExp(
+          r'modals/user/user(?:_edit)?\.php\?(?:user_)?id=(\d+)',
+        ).firstMatch(a.attributes['data-modal-url'] ?? '');
+        if (m2 != null) return int.parse(m2.group(1)!);
+      }
+    }
+    throw ApiException(
+      'Could not find an ITFlow user matching "$email" under Admin Settings → Users.',
+    );
+  }
+
+  /// Creates a new admin-scoped ITFlow API key that runs as the current
+  /// session's user (`run_as_user`), so it inherits that user's module
+  /// permissions and client access instead of being a separate site-wide
+  /// key. Requires the logged-in account to be an ITFlow admin — surfaces a
+  /// clear [ApiException] when it isn't (see [fetchCurrentUserId]).
+  ///
+  /// Returns the new key, its one-time-shown vault decrypt password, and the
+  /// row id (needed later to revoke it on rotation).
+  Future<CreatedApiKey> createApiKeyForCurrentUser({
+    required String name,
+    required DateTime expire,
+  }) async {
+    await _ensureLoggedIn();
+    return createApiKey(
+        name: name, expire: expire, userId: await fetchCurrentUserId());
+  }
+
+  /// The agents an API key can act as, from the "Acts as" picker in Admin >
+  /// API Keys > New API Key. Admin only; throws [ApiException] otherwise.
+  Future<List<NamedOption>> fetchApiKeyAgents() async {
+    final html = await _getModalHtml('admin/modals/api/api_key_add.php');
+    if (html.contains('does not have admin access') ||
+        (html.contains('name="email"') && html.contains('name="password"'))) {
+      throw ApiException(
+          'Only an ITFlow admin can make setup codes for other agents.');
+    }
+    final doc = html_parser.parse(html);
+    final out = <NamedOption>[];
+    for (final o in doc.querySelectorAll('select[name="run_as_user"] option')) {
+      final id = int.tryParse(o.attributes['value'] ?? '');
+      if (id == null || id == 0) continue;
+      out.add(NamedOption(id: id, name: o.text.trim()));
+    }
+    if (out.isEmpty) {
+      throw ApiException(
+          'Only an ITFlow admin can make setup codes for other agents.');
+    }
+    return out;
+  }
+
+  /// Creates an API key acting as agent [userId] (their role and client
+  /// access). Admin only.
+  Future<CreatedApiKey> createApiKey({
+    required String name,
+    required DateTime expire,
+    required int userId,
+  }) async {
+    await _ensureLoggedIn();
+
+    Future<Response> getModal() => _dio.get(
+      '$_root/admin/modals/api/api_key_add.php',
+      options: Options(
+        followRedirects: true,
+        maxRedirects: 5,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
+    var resp = await getModal();
+    var raw = resp.data;
+    var bodyStr = raw is String ? raw : (raw?.toString() ?? '');
+    if (bodyStr.contains('name="email"') &&
+        bodyStr.contains('name="password"')) {
+      _loggedIn = false;
+      _csrfToken = null;
+      await _ensureLoggedIn();
+      resp = await getModal();
+      raw = resp.data;
+      bodyStr = raw is String ? raw : (raw?.toString() ?? '');
+    }
+
+    String htmlContent;
+    if (raw is Map && raw['content'] is String) {
+      htmlContent = raw['content'] as String;
+    } else {
+      try {
+        final decoded = jsonDecode(bodyStr);
+        htmlContent = (decoded is Map && decoded['content'] is String)
+            ? decoded['content'] as String
+            : bodyStr;
+      } catch (_) {
+        htmlContent = bodyStr;
+      }
+    }
+
+    final doc = html_parser.parse(htmlContent);
+    String? hidden(String name) =>
+        doc.querySelector('input[name="$name"]')?.attributes['value'];
+    final csrf = hidden('csrf_token');
+    final secret = hidden('key');
+    final decryptPassword = hidden('password');
+    if (csrf == null || secret == null || decryptPassword == null) {
+      throw ApiException(
+        'Could not load the "New API Key" form: missing fields.',
+      );
+    }
+
+    final expireStr =
+        '${expire.year.toString().padLeft(4, '0')}-${expire.month.toString().padLeft(2, '0')}-${expire.day.toString().padLeft(2, '0')}';
+
+    final form = FormData.fromMap({
+      'csrf_token': csrf,
+      'key': secret,
+      'password': decryptPassword,
+      'name': name,
+      'expire': expireStr,
+      'run_as_user': userId,
+      'ack': '1',
+      'add_api_key': '1',
+    });
+    final postResp = await _dio.post(
+      '$_root/admin/post.php',
+      data: form,
+      options: Options(
+        headers: {'Referer': '$_root/admin/api_keys.php'},
+        contentType: Headers.formUrlEncodedContentType,
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
+    if (postResp.statusCode != null && postResp.statusCode! >= 400) {
+      throw ApiException(
+        'Creating API key failed: HTTP ${postResp.statusCode}',
+        statusCode: postResp.statusCode,
+      );
+    }
+    await _raiseOnFlashError(postResp);
+
+    // ITFlow's create handler doesn't echo the new row id, so look it up
+    // from the listing page by the (unique) name we just gave it.
+    final id = await _findApiKeyIdByName(name);
+
+    return CreatedApiKey(
+      id: id,
+      secret: secret,
+      decryptPassword: decryptPassword,
+      userId: userId,
+      expiresAt: DateTime(expire.year, expire.month, expire.day),
+    );
+  }
+
+  Future<int?> _findApiKeyIdByName(String name) async {
+    final resp = await _dio.get(
+      '$_root/admin/api_keys.php',
+      queryParameters: {'q': name},
+      options: Options(
+        followRedirects: true,
+        maxRedirects: 5,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
+    final body = resp.data?.toString() ?? '';
+    final doc = html_parser.parse(body);
+    for (final row in doc.querySelectorAll('table tbody tr')) {
+      if (row.text.contains(name)) {
+        for (final a in row.querySelectorAll('a')) {
+          final m = RegExp(
+            r'[?&]id=(\d+)',
+          ).firstMatch(a.attributes['data-modal-url'] ?? '');
+          if (m != null) return int.tryParse(m.group(1)!);
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Revokes (immediately expires) an API key the app previously created via
+  /// [createApiKeyForCurrentUser]. Best-effort: callers should treat
+  /// failures as non-fatal since the local credential has already moved on
+  /// to the newly-created key.
+  Future<void> revokeApiKey(int apiKeyId) async {
+    final csrf = await _getCsrf();
+    await _dio.get(
+      '$_root/admin/post.php',
+      queryParameters: {'revoke_api_key': apiKeyId, 'csrf_token': csrf},
+      options: Options(
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
   }
 
   /// Downloads an invoice PDF from the agent post.php endpoint.
@@ -1253,9 +1806,27 @@ class ItflowWebClient {
     }
     final data = resp.data;
     if (resp.statusCode != 200 || data == null || data.isEmpty) {
-      throw ApiException(
-          'Failed to download PDF (status ${resp.statusCode}).');
+      throw ApiException('Failed to download PDF (status ${resp.statusCode}).');
     }
     return data;
   }
+}
+
+/// Result of [ItflowWebClient.createApiKeyForCurrentUser].
+class CreatedApiKey {
+  /// Row id in ITFlow's `api_keys` table. Null if the listing lookup didn't
+  /// find it (the key still works — only rotation-time revocation needs this).
+  final int? id;
+  final String secret;
+  final String decryptPassword;
+  final int userId;
+  final DateTime expiresAt;
+
+  const CreatedApiKey({
+    required this.id,
+    required this.secret,
+    required this.decryptPassword,
+    required this.userId,
+    required this.expiresAt,
+  });
 }

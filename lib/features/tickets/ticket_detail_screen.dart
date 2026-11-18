@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../core/api/providers.dart';
 import '../../core/util.dart';
 import '../../core/widgets.dart';
 import '../clients/client_repository.dart';
@@ -14,6 +13,8 @@ import '../timer/timer_state.dart';
 import 'reply_model.dart';
 import 'ticket_model.dart';
 import 'ticket_repository.dart';
+import '../banners/agent_banners.dart';
+import '../onboarding/tips.dart';
 
 class TicketDetailScreen extends ConsumerWidget {
   final int id;
@@ -60,10 +61,13 @@ class TicketDetailScreen extends ConsumerWidget {
             onRefresh: () async {
               ref.invalidate(ticketProvider(id));
               ref.invalidate(ticketRepliesProvider(id));
+              ref.invalidate(clientBannersProvider(ticket.clientId ?? 0));
+              ref.invalidate(globalBannersProvider);
             },
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                AgentBannerStrip(clientId: ticket.clientId),
                 _HeaderCard(ticket: ticket),
                 const SizedBox(height: 12),
                 _MetaCard(ticket: ticket),
@@ -71,6 +75,12 @@ class TicketDetailScreen extends ConsumerWidget {
                 _SubjectDetailsCard(ticket: ticket),
                 const SizedBox(height: 16),
                 _Actions(ticket: ticket),
+                const FirstVisitTip(
+                  id: 'ticket.detail',
+                  margin: EdgeInsets.only(top: 12),
+                  text:
+                      'Reply lets you choose an internal note (your team only), a public reply, or a public reply emailed to the contact, and move the ticket to another status. The pencil up top edits it.',
+                ),
                 const SizedBox(height: 24),
                 Text('Replies',
                     style: Theme.of(context).textTheme.titleMedium),
@@ -138,15 +148,18 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = ticket.statusName ??
-        (ticket.isResolved
-            ? 'Resolved'
-            : (ticket.statusId == 1
-                ? 'New'
-                : ticket.statusId == 2
-                    ? 'Open'
-                    : ticket.statusId == 3
-                        ? 'In Progress'
-                        : 'Open'));
+        switch (ticket.statusId) {
+          1 => 'New',
+          2 => 'Open',
+          3 => 'On Hold',
+          4 => 'Resolved',
+          5 => 'Closed',
+          _ => ticket.isClosed
+              ? 'Closed'
+              : ticket.isResolved
+                  ? 'Resolved'
+                  : 'Open',
+        };
     Color color;
     switch (name.toLowerCase()) {
       case 'new':
@@ -218,6 +231,23 @@ class _PriorityBadge extends StatelessWidget {
   }
 }
 
+/// When the work is booked: `ticket_schedule` (and its end and onsite flag
+/// on newer ITFlow), or `ticket_scheduled_for` on older builds.
+String _scheduleText(Map<String, dynamic> r) {
+  final start = toDate(r['ticket_schedule'] ?? r['ticket_scheduled_for']);
+  if (start == null) return 'Not scheduled';
+  final end = toDate(r['ticket_schedule_end']);
+  var text = DateFormat.yMMMd().add_jm().format(start);
+  if (end != null) {
+    final sameDay = end.year == start.year &&
+        end.month == start.month &&
+        end.day == start.day;
+    text += ' – ${sameDay ? DateFormat.jm().format(end) : DateFormat.yMMMd().add_jm().format(end)}';
+  }
+  if (toBool(r['ticket_onsite'])) text += ' · Onsite';
+  return text;
+}
+
 class _MetaCard extends ConsumerWidget {
   final Ticket ticket;
   const _MetaCard({required this.ticket});
@@ -237,18 +267,26 @@ class _MetaCard extends ConsumerWidget {
               label: 'Agent',
               value: (ticket.assignedTo == null || ticket.assignedTo == 0)
                   ? 'Unassigned'
-                  : 'User #${ticket.assignedTo}',
+                  : (ref.watch(technicianNamesProvider).value?[
+                          ticket.assignedTo] ??
+                      'User #${ticket.assignedTo}'),
               muted: (ticket.assignedTo == null || ticket.assignedTo == 0),
             ),
             const Divider(height: 20),
             _MetaRow(
               icon: Icons.schedule,
               label: 'Scheduled',
-              value: due != null
-                  ? DateFormat.yMMMd().add_jm().format(due)
-                  : 'Not scheduled',
-              muted: due == null,
+              value: _scheduleText(ticket.raw),
+              muted: _scheduleText(ticket.raw) == 'Not scheduled',
             ),
+            if (due != null) ...[
+              const Divider(height: 20),
+              _MetaRow(
+                icon: Icons.event_outlined,
+                label: 'Due',
+                value: DateFormat.yMMMd().add_jm().format(due),
+              ),
+            ],
             const Divider(height: 20),
             _MetaRow(
               icon: Icons.attach_money,
@@ -480,14 +518,16 @@ class _Actions extends ConsumerWidget {
         if (!ticket.isResolved)
           OutlinedButton.icon(
             onPressed: () async {
-              final ok = await ref
+              final r = await ref
                   .read(ticketRepositoryProvider)
-                  .resolve(ticket.id);
+                  .resolve(ticket.id, clientId: ticket.clientId ?? 0);
+              final ok = r.ok;
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(
-                        ok ? 'Ticket resolved' : 'Could not resolve ticket'),
+                    content: Text(ok
+                        ? 'Ticket resolved'
+                        : 'Could not resolve ticket${r.error != null ? ': ${r.error}' : ''}'),
                   ),
                 );
                 if (ok) {
@@ -510,26 +550,6 @@ class _RepliesList extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final hasWeb = ref.watch(itflowWebClientProvider) != null;
-    if (!hasWeb) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Icon(Icons.lock_outline,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  'Replies aren\'t available — set agent email + password in Settings to load the conversation thread.',
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
     final replies = ref.watch(ticketRepliesProvider(ticketId));
     return replies.when(
       loading: () => const Padding(
@@ -674,7 +694,9 @@ class _ReplyCard extends StatelessWidget {
                               // ITFlow's createdAgo already contains the type
                               // prefix ("Internal - X ago"), so use it as-is
                               // and only fall back to the type label.
-                              reply.createdAgo ?? _typeLabel,
+                              reply.createdAgo == null
+                                  ? _typeLabel
+                                  : '$_typeLabel · ${reply.createdAgo}',
                               textAlign: TextAlign.right,
                               style: Theme.of(context)
                                   .textTheme

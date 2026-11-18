@@ -99,7 +99,12 @@ class AssetRepository {
 
   Future<({bool ok, String? error})> delete(int id) async {
     final client = requireClient(ref);
-    final resp = await client.post('assets', 'delete', body: {'asset_id': id});
+    // An all-clients key only matches the asset with its client_id sent.
+    final current = await get(id);
+    final resp = await client.post('assets', 'delete', body: {
+      'asset_id': id,
+      if ((current?.clientId ?? 0) > 0) 'client_id': current!.clientId,
+    });
     return (ok: resp.success, error: resp.message);
   }
 }
