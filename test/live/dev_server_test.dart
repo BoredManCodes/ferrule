@@ -681,6 +681,17 @@ void main() {
       expect(r.warning, startsWith('Ticket not put on the invoice'));
       expect(r.total, 50);
     });
+
+    test('an unpaid quick-pay invoice can be cancelled', () async {
+      final r = await container.read(quickPayRepositoryProvider).create(
+            clientId: clientId,
+            amount: 25,
+            lineName: 'Walked away $stamp',
+          );
+      await web.cancelInvoice(r.invoiceId);
+      final inv = await api.get('invoices', 'read', query: {'invoice_id': r.invoiceId});
+      expect(inv.row?['invoice_status'], 'Cancelled');
+    });
   });
 
   // Last: it replaces the key the other tests use.

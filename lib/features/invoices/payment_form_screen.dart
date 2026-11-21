@@ -10,30 +10,46 @@ import '../readonly/readonly_screens.dart';
 import 'cash_tender.dart';
 import 'payment_form_data.dart';
 import 'payment_repository.dart';
+import 'quick_pay.dart';
 
 class PaymentFormScreen extends ConsumerWidget {
   final int invoiceId;
 
   /// Method to start on (e.g. `Cash` from quick payment), when offered.
   final String? initialMethod;
-  const PaymentFormScreen({super.key, required this.invoiceId, this.initialMethod});
+
+  /// Opened from quick payment: leaving unpaid offers to cancel the invoice.
+  final bool quick;
+  const PaymentFormScreen({
+    super.key,
+    required this.invoiceId,
+    this.initialMethod,
+    this.quick = false,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(paymentAddFormProvider(invoiceId));
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(async.value == null
-            ? 'Make Payment'
-            : '${async.value!.invoiceLabel}: Make Payment'),
-      ),
-      body: async.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => ErrorView(
-          error: e,
-          onRetry: () => ref.invalidate(paymentAddFormProvider(invoiceId)),
+    return QuickPayExitGuard(
+      invoiceId: invoiceId,
+      enabled: quick,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(
+            async.value == null
+                ? 'Make Payment'
+                : '${async.value!.invoiceLabel}: Make Payment',
+          ),
         ),
-        data: (form) => _PaymentFormBody(form: form, initialMethod: initialMethod),
+        body: async.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => ErrorView(
+            error: e,
+            onRetry: () => ref.invalidate(paymentAddFormProvider(invoiceId)),
+          ),
+          data: (form) =>
+              _PaymentFormBody(form: form, initialMethod: initialMethod),
+        ),
       ),
     );
   }
@@ -114,7 +130,8 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
     final amount = double.parse(_amount.text.trim());
     if (amount > widget.form.balance + 0.0001) {
       _toast(
-          'Amount can\'t exceed the balance (${widget.form.balance.toStringAsFixed(2)} ${widget.form.currencyCode}).');
+        'Amount can\'t exceed the balance (${widget.form.balance.toStringAsFixed(2)} ${widget.form.currencyCode}).',
+      );
       return;
     }
     var reference = _reference.text.trim();
@@ -128,7 +145,9 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
     }
     setState(() => _busy = true);
     try {
-      await ref.read(paymentRepositoryProvider).add(
+      await ref
+          .read(paymentRepositoryProvider)
+          .add(
             csrfToken: widget.form.csrfToken,
             invoiceId: widget.form.invoiceId,
             balance: widget.form.balance,
@@ -144,9 +163,10 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
       // and balance reflect on the previous screen.
       invalidateModuleList(ref, 'invoices');
       ref.invalidate(paymentAddFormProvider(widget.form.invoiceId));
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Payment recorded')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Payment recorded')));
+      QuickPayExitGuard.release(context);
       context.pop();
     } catch (e) {
       if (!mounted) return;
@@ -178,20 +198,22 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  Icon(Icons.account_balance_wallet_outlined,
-                      color: Theme.of(context).colorScheme.primary),
+                  Icon(
+                    Icons.account_balance_wallet_outlined,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Balance',
-                            style: Theme.of(context).textTheme.bodySmall),
+                        Text(
+                          'Balance',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                         Text(
                           '$balanceFmt ${widget.form.currencyCode}',
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
+                          style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                       ],
@@ -248,7 +270,9 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
             const SizedBox(height: 12),
             TextFormField(
               controller: _tendered,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               inputFormatters: [
                 FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
               ],
@@ -267,11 +291,11 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
                       ? 'Short by ${(-_change!).toStringAsFixed(2)}'
                       : 'Change due: ${_change!.toStringAsFixed(2)}',
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: _change! < 0
-                            ? Theme.of(context).colorScheme.error
-                            : Theme.of(context).colorScheme.primary,
-                      ),
+                    fontWeight: FontWeight.w700,
+                    color: _change! < 0
+                        ? Theme.of(context).colorScheme.error
+                        : Theme.of(context).colorScheme.primary,
+                  ),
                 ),
               ),
           ],
@@ -380,8 +404,7 @@ class _PaymentMethodDropdown extends StatelessWidget {
         prefixIcon: Icon(Icons.payments_outlined),
       ),
       items: [
-        for (final o in options)
-          DropdownMenuItem(value: o, child: Text(o)),
+        for (final o in options) DropdownMenuItem(value: o, child: Text(o)),
       ],
       onChanged: onChanged,
     );

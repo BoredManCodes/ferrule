@@ -16,8 +16,7 @@ String cashReference(double tendered, double change) =>
 /// rounded price. Null when no price lands on the cent.
 double? priceForGross(double gross, double rate) {
   if (rate <= 0) return gross;
-  int total(int priceCents) =>
-      priceCents + (priceCents * rate).round();
+  int total(int priceCents) => priceCents + (priceCents * rate).round();
   final target = (gross * 100).round();
   final guess = (target / (1 + rate)).round();
   for (final c in [guess, guess - 1, guess + 1, guess - 2, guess + 2]) {

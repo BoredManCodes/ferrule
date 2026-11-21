@@ -1763,6 +1763,35 @@ class ItflowWebClient {
     );
   }
 
+  /// Cancels an invoice (status Cancelled, so it never goes overdue). ITFlow
+  /// flashes its success in red, so the caller checks the status after.
+  Future<void> cancelInvoice(int invoiceId) async {
+    await _ensureLoggedIn();
+    Future<Response> doGet() async => _dio.get(
+      '$_root/agent/post.php',
+      queryParameters: {
+        'cancel_invoice': invoiceId,
+        'csrf_token': await _getCsrf(),
+      },
+      options: Options(
+        headers: {'Referer': '$_root/agent/invoice.php?invoice_id=$invoiceId'},
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
+    var resp = await doGet();
+    if ((resp.headers.value('location') ?? '').toLowerCase().contains('login.php')) {
+      _loggedIn = false;
+      _csrfToken = null;
+      await _ensureLoggedIn();
+      resp = await doGet();
+    }
+    if (resp.statusCode != null && resp.statusCode! >= 400) {
+      throw ApiException('Cancel failed: HTTP ${resp.statusCode}',
+          statusCode: resp.statusCode);
+    }
+  }
+
   /// Posts to agent/ajax.php and returns its JSON, throwing the server's
   /// message when it answers `status: error`.
   Future<Map<String, dynamic>> _postAjax(

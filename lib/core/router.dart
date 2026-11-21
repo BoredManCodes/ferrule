@@ -272,12 +272,14 @@ final routerProvider = Provider<GoRouter>((ref) {
                 path: ':id/pay',
                 builder: (_, s) => PaymentFormScreen(
                     invoiceId: int.parse(s.pathParameters['id']!),
-                    initialMethod: s.uri.queryParameters['method']),
+                    initialMethod: s.uri.queryParameters['method'],
+                    quick: s.uri.queryParameters['quick'] == '1'),
               ),
               GoRoute(
                 path: ':id/qr',
                 builder: (_, s) => PayQrScreen(
-                    invoiceId: int.parse(s.pathParameters['id']!)),
+                    invoiceId: int.parse(s.pathParameters['id']!),
+                    quick: s.uri.queryParameters['quick'] == '1'),
               ),
             ],
           ),
