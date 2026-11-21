@@ -2039,6 +2039,12 @@ class _GuestInvoiceCard extends ConsumerWidget {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                FilledButton.icon(
+                  onPressed: () => context.push('/invoices/$invoiceId/qr'),
+                  icon: const Icon(Icons.qr_code_2, size: 18),
+                  label: const Text('Show QR to pay on their phone'),
+                ),
               ],
             ),
           ),

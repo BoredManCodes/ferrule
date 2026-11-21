@@ -24,6 +24,7 @@ import 'package:ferrule/features/assets/asset_repository.dart';
 import 'package:ferrule/features/banners/agent_banners.dart';
 import 'package:ferrule/features/clients/client_repository.dart';
 import 'package:ferrule/features/credentials/credential_repository.dart';
+import 'package:ferrule/features/invoices/quick_pay.dart';
 import 'package:ferrule/features/tickets/reply_model.dart';
 import 'package:ferrule/features/tickets/ticket_repository.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -616,6 +617,69 @@ void main() {
       // The app never rotates a key it didn't make for itself.
       expect(await rotateApiKeyIfNeeded(techCreds, force: true), isNull);
       if (code.apiKeyId != null) await web.revokeApiKey(code.apiKeyId!);
+    });
+  });
+
+  group('quick payment', skip: !_live, () {
+    test('ticket quick pay makes a sent invoice for the typed amount', () async {
+      final t = await container.read(ticketRepositoryProvider).create(
+            subject: 'Quick pay ticket $stamp',
+            priority: 'Low',
+            clientId: clientId,
+            billable: true,
+          );
+      // Upstream only bills done tickets.
+      expect((await container.read(ticketRepositoryProvider)
+              .resolve(t.id!, clientId: clientId)).ok, isTrue);
+      final r = await container.read(quickPayRepositoryProvider).create(
+            clientId: clientId,
+            ticketId: t.id,
+            amount: 110,
+            lineName: 'On-site service $stamp',
+            note: 'Predeploy quick pay',
+          );
+      final inv = await api.get('invoices', 'read', query: {'invoice_id': r.invoiceId});
+      expect(inv.row?['invoice_status'], 'Sent');
+      expect(inv.row?['invoice_scope'], quickPayScope);
+      expect(double.parse('${inv.row?['invoice_amount']}'), 110);
+      expect(r.total, 110);
+      expect(r.warning, isNull);
+      final tk = await api.get('tickets', 'read', query: {'ticket_id': t.id});
+      expect('${tk.row?['ticket_invoice_id']}', '${r.invoiceId}');
+      final items = await api.get('invoice_items', 'read',
+          query: {'invoice_id': r.invoiceId, 'limit': 50});
+      final mine = items.rows
+          .where((i) => '${i['item_invoice_id']}' == '${r.invoiceId}')
+          .toList();
+      expect(mine.length, 1);
+      expect(mine.single['item_name'], 'On-site service $stamp');
+
+      final form = await web.fetchInvoicePaymentForm(r.invoiceId);
+      expect(form.balance, 110);
+      await web.addInvoicePayment(
+        csrfToken: form.csrfToken,
+        invoiceId: r.invoiceId,
+        balance: form.balance,
+        currencyCode: form.currencyCode,
+        date: DateTime.now().toIso8601String().substring(0, 10),
+        amount: 110,
+        accountId: form.defaultAccountId ?? form.accounts.first.id,
+        paymentMethod: form.paymentMethods.first,
+        reference: 'Cash, tendered 120.00, change 10.00',
+      );
+      final paid = await api.get('invoices', 'read', query: {'invoice_id': r.invoiceId});
+      expect(paid.row?['invoice_status'], 'Paid');
+    });
+
+    test('non-billable ticket still takes the money, with a warning', () async {
+      final r = await container.read(quickPayRepositoryProvider).create(
+            clientId: clientId,
+            ticketId: ticketId,
+            amount: 50,
+            lineName: 'Callout',
+          );
+      expect(r.warning, startsWith('Ticket not put on the invoice'));
+      expect(r.total, 50);
     });
   });
 

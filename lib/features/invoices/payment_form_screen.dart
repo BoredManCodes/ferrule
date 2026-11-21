@@ -7,12 +7,16 @@ import 'package:intl/intl.dart';
 import '../../core/widgets.dart';
 import '../expenses/expense_form_data.dart';
 import '../readonly/readonly_screens.dart';
+import 'cash_tender.dart';
 import 'payment_form_data.dart';
 import 'payment_repository.dart';
 
 class PaymentFormScreen extends ConsumerWidget {
   final int invoiceId;
-  const PaymentFormScreen({super.key, required this.invoiceId});
+
+  /// Method to start on (e.g. `Cash` from quick payment), when offered.
+  final String? initialMethod;
+  const PaymentFormScreen({super.key, required this.invoiceId, this.initialMethod});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -29,7 +33,7 @@ class PaymentFormScreen extends ConsumerWidget {
           error: e,
           onRetry: () => ref.invalidate(paymentAddFormProvider(invoiceId)),
         ),
-        data: (form) => _PaymentFormBody(form: form),
+        data: (form) => _PaymentFormBody(form: form, initialMethod: initialMethod),
       ),
     );
   }
@@ -37,7 +41,8 @@ class PaymentFormScreen extends ConsumerWidget {
 
 class _PaymentFormBody extends ConsumerStatefulWidget {
   final PaymentAddFormData form;
-  const _PaymentFormBody({required this.form});
+  final String? initialMethod;
+  const _PaymentFormBody({required this.form, this.initialMethod});
 
   @override
   ConsumerState<_PaymentFormBody> createState() => _PaymentFormBodyState();
@@ -47,6 +52,7 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
   final _formKey = GlobalKey<FormState>();
   final _amount = TextEditingController();
   final _reference = TextEditingController();
+  final _tendered = TextEditingController();
   final _df = DateFormat('yyyy-MM-dd');
 
   late DateTime _date;
@@ -61,12 +67,27 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
     _amount.text = widget.form.balance.toStringAsFixed(2);
     _accountId = widget.form.defaultAccountId;
     _paymentMethod = widget.form.defaultPaymentMethod;
+    final want = widget.initialMethod?.toLowerCase();
+    if (want != null) {
+      for (final m in widget.form.paymentMethods) {
+        if (m.toLowerCase() == want) _paymentMethod = m;
+      }
+    }
+  }
+
+  bool get _isCash => _paymentMethod?.trim().toLowerCase() == 'cash';
+
+  double? get _change {
+    final a = double.tryParse(_amount.text.trim());
+    if (a == null) return null;
+    return cashChange(a, _tendered.text);
   }
 
   @override
   void dispose() {
     _amount.dispose();
     _reference.dispose();
+    _tendered.dispose();
     super.dispose();
   }
 
@@ -96,6 +117,15 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
           'Amount can\'t exceed the balance (${widget.form.balance.toStringAsFixed(2)} ${widget.form.currencyCode}).');
       return;
     }
+    var reference = _reference.text.trim();
+    final change = _isCash ? _change : null;
+    if (change != null) {
+      if (change < 0) {
+        _toast('Tendered is less than the amount');
+        return;
+      }
+      if (reference.isEmpty) reference = cashReference(amount + change, change);
+    }
     setState(() => _busy = true);
     try {
       await ref.read(paymentRepositoryProvider).add(
@@ -107,7 +137,7 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
             amount: amount,
             accountId: _accountId!,
             paymentMethod: _paymentMethod!,
-            reference: _reference.text.trim(),
+            reference: reference,
           );
       if (!mounted) return;
       // Invalidate cached invoice + list so the new status (Paid / Partial)
@@ -194,6 +224,7 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
               prefixIcon: Icon(Icons.attach_money),
               hintText: '0.00',
             ),
+            onChanged: (_) => setState(() {}),
             validator: (v) {
               if (v == null || v.trim().isEmpty) return 'Required';
               final d = double.tryParse(v.trim());
@@ -213,6 +244,37 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
             options: widget.form.paymentMethods,
             onChanged: (v) => setState(() => _paymentMethod = v),
           ),
+          if (_isCash) ...[
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _tendered,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+              ],
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                labelText: 'Amount tendered',
+                prefixIcon: Icon(Icons.money_outlined),
+                hintText: 'What the customer handed over',
+              ),
+            ),
+            if (_change != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8, left: 12),
+                child: Text(
+                  _change! < 0
+                      ? 'Short by ${(-_change!).toStringAsFixed(2)}'
+                      : 'Change due: ${_change!.toStringAsFixed(2)}',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: _change! < 0
+                            ? Theme.of(context).colorScheme.error
+                            : Theme.of(context).colorScheme.primary,
+                      ),
+                ),
+              ),
+          ],
           const SizedBox(height: 12),
           TextFormField(
             controller: _reference,
@@ -234,6 +296,14 @@ class _PaymentFormBodyState extends ConsumerState<_PaymentFormBody> {
                   )
                 : const Icon(Icons.check),
             label: Text(_busy ? 'Saving…' : 'Pay'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy
+                ? null
+                : () => context.push('/invoices/${widget.form.invoiceId}/qr'),
+            icon: const Icon(Icons.qr_code_2),
+            label: const Text('Card on their phone (QR)'),
           ),
         ],
       ),

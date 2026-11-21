@@ -769,7 +769,7 @@ class ItflowWebClient {
   }
 
   /// Posts to /agent/post.php with a single retry if the session has lapsed.
-  Future<void> _postAgent({
+  Future<Response> _postAgent({
     required FormData form,
     required String referer,
   }) async {
@@ -809,6 +809,7 @@ class ItflowWebClient {
       );
     }
     await _raiseOnFlashError(resp);
+    return resp;
   }
 
   /// Hits the web UI's AI reword endpoint (`/agent/ajax.php?ai_reword`).
@@ -1616,6 +1617,196 @@ class ItflowWebClient {
     // ITFlow validates `amount > balance` on the server and flashes an error
     // back via session; surface it.
     await _raiseOnFlashError(resp);
+  }
+
+  /// What a form would post untouched: text and hidden inputs, ticked
+  /// boxes, each select's selected option (else its first), textareas.
+  static Map<String, String> formDefaults(String html) {
+    final doc = html_parser.parse(html);
+    final out = <String, String>{};
+    for (final el in doc.querySelectorAll('input, select, textarea')) {
+      final name = el.attributes['name'];
+      if (name == null || name.isEmpty || name.endsWith('[]')) continue;
+      if (el.localName == 'select') {
+        final opts = el.querySelectorAll('option');
+        if (opts.isEmpty) continue;
+        final pick = opts.firstWhere(
+          (o) => o.attributes.containsKey('selected'),
+          orElse: () => opts.first,
+        );
+        out[name] = pick.attributes['value'] ?? pick.text.trim();
+      } else if (el.localName == 'textarea') {
+        out[name] = el.text;
+      } else {
+        final type = (el.attributes['type'] ?? 'text').toLowerCase();
+        if (type == 'submit' || type == 'button' || type == 'file') continue;
+        if ((type == 'checkbox' || type == 'radio') &&
+            !el.attributes.containsKey('checked')) {
+          continue;
+        }
+        out[name] = el.attributes['value'] ?? (type == 'checkbox' ? 'on' : '');
+      }
+    }
+    return out;
+  }
+
+  /// The invoice id in a post redirect like `invoice.php?invoice_id=42`.
+  static int? invoiceIdFromLocation(String? loc) {
+    if (loc == null) return null;
+    final m = RegExp(r'invoice\.php\?(?:[^#]*&)?invoice_id=(\d+)').firstMatch(loc);
+    return m == null ? null : int.tryParse(m.group(1)!);
+  }
+
+  /// Makes a draft invoice for [clientId] through the web "New Invoice"
+  /// form, keeping its defaults (category, discount). Returns its id.
+  Future<int> createInvoice({
+    required int clientId,
+    required String scope,
+    required String date,
+  }) async {
+    final fields = formDefaults(await _getModalHtml(
+      'agent/modals/invoice/invoice_add.php',
+      query: {'client_id': clientId},
+    ));
+    fields.remove('add_invoice');
+    final csrf = await _getCsrf();
+    final resp = await _postAgent(
+      form: FormData.fromMap({
+        ...fields,
+        'csrf_token': fields['csrf_token']?.isNotEmpty == true
+            ? fields['csrf_token']
+            : csrf,
+        'add_invoice': '1',
+        'client_id': clientId,
+        'client': clientId,
+        'scope': scope,
+        'date': date,
+      }),
+      referer: '$_root/agent/invoices.php?client_id=$clientId',
+    );
+    final id = invoiceIdFromLocation(resp.headers.value('location'));
+    if (id == null) {
+      throw ApiException('ITFlow made no invoice (no invoice id came back).');
+    }
+    return id;
+  }
+
+  /// Adds a typed-in line (qty 1) the way the invoice page's add field
+  /// does, so ITFlow gives it the client's usual tax. Returns the line id.
+  Future<int> addInvoiceLine({
+    required int invoiceId,
+    required String name,
+    String description = '',
+    required double price,
+  }) async {
+    final r = await _postAjax({
+      'billing_item_add': '1',
+      'type': 'invoice',
+      'doc_id': '$invoiceId',
+      'name': name,
+      'description': description,
+      'qty': '1',
+      'price': price.toStringAsFixed(2),
+    }, referer: '$_root/agent/invoice.php?invoice_id=$invoiceId');
+    final id = int.tryParse('${r['item_id']}');
+    if (id == null) throw ApiException('ITFlow did not add the line.');
+    return id;
+  }
+
+  /// Changes one field of a line in place (price, qty, name, ...).
+  Future<void> setInvoiceLineField({
+    required int invoiceId,
+    required int itemId,
+    required String field,
+    required String value,
+  }) async {
+    await _postAjax({
+      'billing_item_set': '1',
+      'type': 'invoice',
+      'doc_id': '$invoiceId',
+      'item_id': '$itemId',
+      'field': field,
+      'value': value,
+    }, referer: '$_root/agent/invoice.php?invoice_id=$invoiceId');
+  }
+
+  /// Puts a ticket on an invoice without billing its time, so the ticket
+  /// reads as billed and the invoice keeps the lines it has.
+  Future<void> linkTicketToInvoice({
+    required int invoiceId,
+    required int ticketId,
+  }) async {
+    await _postAgent(
+      form: FormData.fromMap({
+        'add_ticket_to_invoice': '1',
+        'csrf_token': await _getCsrf(),
+        'invoice_id': invoiceId,
+        'ticket_id': ticketId,
+        'ticket_ids[]': ticketId,
+      }),
+      referer: '$_root/agent/invoice.php?invoice_id=$invoiceId',
+    );
+  }
+
+  /// Marks an invoice sent (hand delivered), which is what lets the guest
+  /// page take a card payment on it.
+  Future<void> markInvoiceSent(int invoiceId) async {
+    await _postAgent(
+      form: FormData.fromMap({
+        'mark_invoice_sent': '1',
+        'csrf_token': await _getCsrf(),
+        'invoice_id': invoiceId,
+        'sent_method': 'Hand Delivered',
+        'note': 'On-site payment',
+      }),
+      referer: '$_root/agent/invoice.php?invoice_id=$invoiceId',
+    );
+  }
+
+  /// Posts to agent/ajax.php and returns its JSON, throwing the server's
+  /// message when it answers `status: error`.
+  Future<Map<String, dynamic>> _postAjax(
+    Map<String, String> fields, {
+    required String referer,
+  }) async {
+    Future<Response> doPost() async => _dio.post(
+      '$_root/agent/ajax.php',
+      data: {...fields, 'csrf_token': await _getCsrf()},
+      options: Options(
+        headers: {'Referer': referer, 'X-Requested-With': 'XMLHttpRequest'},
+        contentType: Headers.formUrlEncodedContentType,
+        followRedirects: false,
+        validateStatus: (s) => s != null && s < 500,
+      ),
+    );
+    await _ensureLoggedIn();
+    var resp = await doPost();
+    final loc = resp.headers.value('location') ?? '';
+    if (loc.toLowerCase().contains('login.php')) {
+      _loggedIn = false;
+      _csrfToken = null;
+      await _ensureLoggedIn();
+      resp = await doPost();
+    }
+    final raw = resp.data;
+    Object? decoded = raw;
+    if (raw is String) {
+      try {
+        decoded = jsonDecode(raw);
+      } catch (_) {
+        decoded = null;
+      }
+    }
+    if (decoded is! Map) {
+      throw ApiException(
+          'ITFlow gave an unexpected answer (HTTP ${resp.statusCode}).',
+          statusCode: resp.statusCode);
+    }
+    final map = Map<String, dynamic>.from(decoded);
+    if (map['status'] == 'error') {
+      throw ApiException('${map['message'] ?? 'ITFlow refused the change.'}');
+    }
+    return map;
   }
 
   /// Finds the current session's ITFlow user id by searching

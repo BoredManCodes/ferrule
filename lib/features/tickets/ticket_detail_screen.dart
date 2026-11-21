@@ -27,6 +27,22 @@ class TicketDetailScreen extends ConsumerWidget {
       appBar: AppBar(
         title: Text(async.value?.displayNumber ?? 'Ticket'),
         actions: [
+          if (async.value?.clientId case final clientId? when clientId > 0)
+            IconButton(
+              tooltip: 'Quick payment',
+              icon: const Icon(Icons.point_of_sale_outlined),
+              onPressed: () {
+                final t = async.value!;
+                final subject = (t.subject ?? '').trim();
+                context.push(Uri(path: '/quick-pay', queryParameters: {
+                  'client': '$clientId',
+                  'ticket': '$id',
+                  'line': subject.isEmpty
+                      ? t.displayNumber
+                      : '${t.displayNumber}: $subject',
+                }).toString());
+              },
+            ),
           if (async.value != null)
             IconButton(
               tooltip: 'Edit',

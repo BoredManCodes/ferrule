@@ -17,7 +17,9 @@ import '../features/credentials/credential_form_screen.dart';
 import '../features/credentials/credentials_screen.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/expenses/expense_form_screen.dart';
+import '../features/invoices/pay_qr_screen.dart';
 import '../features/invoices/payment_form_screen.dart';
+import '../features/invoices/quick_pay.dart';
 import '../features/lock/lock_screen.dart';
 import '../features/more/more_screen.dart';
 import '../features/onboarding/welcome_tour_screen.dart';
@@ -250,6 +252,14 @@ final routerProvider = Provider<GoRouter>((ref) {
             ],
           ),
           GoRoute(
+            path: '/quick-pay',
+            builder: (_, s) => QuickPayScreen(
+              clientId: int.parse(s.uri.queryParameters['client']!),
+              ticketId: int.tryParse(s.uri.queryParameters['ticket'] ?? ''),
+              defaultLineName: s.uri.queryParameters['line'],
+            ),
+          ),
+          GoRoute(
             path: '/invoices',
             builder: (_, __) => const InvoicesScreen(),
             routes: [
@@ -261,6 +271,12 @@ final routerProvider = Provider<GoRouter>((ref) {
               GoRoute(
                 path: ':id/pay',
                 builder: (_, s) => PaymentFormScreen(
+                    invoiceId: int.parse(s.pathParameters['id']!),
+                    initialMethod: s.uri.queryParameters['method']),
+              ),
+              GoRoute(
+                path: ':id/qr',
+                builder: (_, s) => PayQrScreen(
                     invoiceId: int.parse(s.pathParameters['id']!)),
               ),
             ],

@@ -14,6 +14,7 @@ const _bannersHtml = '''
 ''';
 
 void main() {
+  formDefaultsTests();
   test('banners showing on a client page', () {
     final st = parseClientBannerState(_bannersHtml);
     expect(st.canEdit, isTrue);
@@ -92,5 +93,35 @@ void main() {
     expect(r.authorInitials, 'DU');
     expect(r.hasTimeWorked, isTrue);
     expect(r.createdAgo, 'Nov 18, 9:00 AM');
+  });
+}
+
+void formDefaultsTests() {
+  test('form defaults take what the form would post', () {
+    const html = '''
+<form><input type="hidden" name="csrf_token" value="abc">
+<input type="text" name="scope" value="">
+<input type="checkbox" name="send" value="1">
+<input type="checkbox" name="keep" value="1" checked>
+<select name="category"><option value="0">- None -</option><option value="7" selected>Support</option></select>
+<select name="currency"><option value="AUD">AUD</option><option value="USD">USD</option></select>
+<textarea name="note">hello</textarea>
+<button type="submit" name="add_invoice">Create</button></form>''';
+    final f = ItflowWebClient.formDefaults(html);
+    expect(f['csrf_token'], 'abc');
+    expect(f['scope'], '');
+    expect(f.containsKey('send'), isFalse);
+    expect(f['keep'], '1');
+    expect(f['category'], '7');
+    expect(f['currency'], 'AUD');
+    expect(f['note'], 'hello');
+    expect(f.containsKey('add_invoice'), isFalse);
+  });
+
+  test('invoice id from a post redirect', () {
+    expect(ItflowWebClient.invoiceIdFromLocation('invoice.php?invoice_id=42'), 42);
+    expect(ItflowWebClient.invoiceIdFromLocation('/agent/invoice.php?client_id=3&invoice_id=9#items'), 9);
+    expect(ItflowWebClient.invoiceIdFromLocation('invoices.php'), isNull);
+    expect(ItflowWebClient.invoiceIdFromLocation(null), isNull);
   });
 }

@@ -37,6 +37,12 @@ class ClientDetailScreen extends ConsumerWidget {
               icon: const Icon(Icons.unarchive_outlined),
               onPressed: () => _unarchive(context, ref),
             ),
+          if (async.value != null && !async.value!.archived)
+            IconButton(
+              tooltip: 'Quick payment',
+              icon: const Icon(Icons.point_of_sale_outlined),
+              onPressed: () => context.push('/quick-pay?client=$id'),
+            ),
           if (ref.watch(clientBannersProvider(id)).value?.canEdit ?? false)
             IconButton(
               tooltip: 'Banners',
